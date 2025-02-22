@@ -38,6 +38,7 @@ https://github.com/user-attachments/assets/eb9552e4-32e3-4b9c-8be6-1a401453ae10
 ### Run
 Binaries are located in `build` directory.
 ```
+./build/keyhole
 ./build/wind
 ```
 

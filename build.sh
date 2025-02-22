@@ -20,6 +20,7 @@ for src in src/*.c; do
 
   echo "Building '$src' -> '$out'"
   echo "$build_cmd"
+  echo ""
 
   $build_cmd || die "failed to build '$src'!"
 done

@@ -1,5 +1,5 @@
 // Keys and Keyholes screensaver.
-// Keys and Keyholes flying around and collingind.
+// Keys and Keyholes flying around and colliding.
 // Matching keys and keyholes dissapear.
 //
 // Platforms
