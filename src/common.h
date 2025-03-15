@@ -330,7 +330,7 @@ FORCE_INLINE static void debugbreak(void) {
 // EXPECT() behaves like Debug + Release assert
 #define EXPECT(condition, msg) expect_msg(!!(condition), \
     __FILE__ ":" STR(__LINE__) ": Fatal:   (" STR(condition) ") == 0\n"\
-    msg)
+    msg "\n")
 
 FORCE_INLINE static void expect_msg(i32 condition, const char *msg) {
   if (!condition) {
@@ -341,7 +341,7 @@ FORCE_INLINE static void expect_msg(i32 condition, const char *msg) {
 
 #define WARN_IF(condition, msg) warn_if_msg(!!(condition), \
     __FILE__ ":" STR(__LINE__) ": Warning: (" STR(condition) ") == 0\n"\
-    msg)
+    msg "\n")
 
 FORCE_INLINE static void warn_if_msg(i32 condition, const char *msg) {
   if (condition) {
@@ -726,8 +726,8 @@ static void event_loop_init(struct event_loop *loop) {
   CFRunLoopRef        runloop;
 
   event_mask  = (1 << kCGEventKeyDown) | (1 << kCGEventKeyUp);
-  event_tap   = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap, 0,
-      event_mask, event_handler, loop);
+  event_tap   = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
+      kCGEventTapOptionListenOnly, event_mask, event_handler, loop);
   EXPECT(event_tap, "CGEventTapCreate() failed");
 
   source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, event_tap, 0);

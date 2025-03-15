@@ -10,6 +10,7 @@
 -fno-builtin
 -nostdlib
 -e _start
+-mcpu=native
 -framework OpenGL
 -framework CoreGraphics
 -framework ApplicationServices
