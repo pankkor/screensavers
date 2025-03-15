@@ -4,6 +4,7 @@
 - OpenGL to render.
 - No libc (-nostdlib).
 - Not optimizated.
+- Taps to keyboard events. Requests Input Monitoring perimssion.
 - To exit press ESC or Ctrl-C.
 
 ### Supported Platforms
