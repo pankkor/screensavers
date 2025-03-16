@@ -1,15 +1,19 @@
-// Keys and Keyholes screensaver.
-// Keys and Keyholes flying around and colliding.
-// Matching keys and keyholes dissapear.
+// Connect two lovers.
 //
 // Platforms
 //   macOS AArch64
 // Build
 //   ./build.sh
 // Run
-//   ./build/keyhole
+//   ./build/lovers
 
 #include "common.h"
+
+// TODO:
+// - Keyboard input for player
+// - Change sprites
+// - Change direction of strangers from time to time
+// - Lover 2 escapes
 
 // --------------------------------------
 // Config
@@ -30,7 +34,8 @@ enum sprite_flag : u16 {
   SPRITE_STATE_COLLIDE    = 1 << 3,
   SPRITE_STATE_FADE_IN    = 1 << 4,
   SPRITE_STATE_FADE_OUT   = 1 << 5,
-  SPRITE_STATE_KEY        = 1 << 6, // 0 - KEYHOLE, 1 - KEY
+  SPRITE_STATE_LOVER      = 1 << 6, // 0 - STRANGER, 1 - LOVER
+  SPRITE_STATE_PLAYER     = 1 << 7, // 0 - STRANGER, 1 - LOVER
 };
 
 struct sprite_state {
@@ -50,12 +55,19 @@ enum game_state {
   ((hex & 0x000000FF) >> 0)  / 255.0f,                                         \
 }
 
-enum {PALETTE_COUNT = 4};
+enum {PALETTE_COUNT = 5};
 static const f32 s_col_palettes[PALETTE_COUNT][4] = {
-  RGBA_F32x4(0x540D6EFF),
-  RGBA_F32x4(0xEE4266FF),
-  RGBA_F32x4(0xFFD23FFF),
-  RGBA_F32x4(0x38CEACFF),
+  RGBA_F32x4(0x355070FF),
+  RGBA_F32x4(0x6D597AFF),
+  RGBA_F32x4(0x6D597AFF),
+  RGBA_F32x4(0xE56B6FFF),
+  RGBA_F32x4(0xEAAC8BFF),
+};
+
+enum {LOVER_PALETTE_COUNT = 2};
+static const f32 s_lover_col_palettes[LOVER_PALETTE_COUNT][4] = {
+  RGBA_F32x4(0x631A86FF),
+  RGBA_F32x4(0xF45866FF),
 };
 
 struct sprites {
@@ -108,7 +120,7 @@ out vec4 frag_col;                                                             \
                                                                                \
 void main(void) {                                                              \
     vec2 ra = texture(mask_tx, f_uv).rg;                                       \
-    frag_col = vec4(f_col.rgb * ra.r, 1.0f - f_col.a * ra.g);                  \
+    frag_col = vec4(f_col.rgb * ra.r * ra.g,  f_col.a * ra.g);                 \
 }                                                                              \
 ";
 
@@ -310,29 +322,29 @@ void start(void) {
   struct xorshift64_state vel_st  = {137382305742834};
   struct xorshift64_state pos_st  = {815936748814573};
 
-  // keyholes
-  i32 KEYHOLES_COUNT = SPRITES_COUNT * 0.5f;
-  i32 KEYS_COUNT = SPRITES_COUNT - KEYHOLES_COUNT;
+  // Spawn
+  i32 PLAYER_IDX = 0;
+  i32 LOVERS_COUNT = 2;
+  i32 STRANGERS_COUNT = SPRITES_COUNT - LOVERS_COUNT;
 
-  for (i32 idx = 0; idx < KEYHOLES_COUNT; ++idx) {
+  for (i32 idx = 0; idx < LOVERS_COUNT; ++idx) {
     i32 i       = idx;
     f32 kvel0   = xorshift64(&vel_st) / (f32)U64_MAX;
     f32 kvel1   = xorshift64(&vel_st) / (f32)U64_MAX;
-    f32 k       = (f32)(idx + 0.5f) / KEYHOLES_COUNT;
-    i32 palette  = idx % PALETTE_COUNT;
+    f32 k       = (f32)(idx + 0.5f) / LOVERS_COUNT;
+    i32 palette = idx % LOVER_PALETTE_COUNT;
 
-    s_sprites.pos[i * 3 + 0]          = bounds[3];
+    s_sprites.pos[i * 3 + 0]          = bounds[0];
     s_sprites.pos[i * 3 + 1]          = lerpf32(k, bounds[2], bounds[3]);
-
     s_sprites.pos[i * 3 + 2]          = (f32)i / SPRITES_COUNT;
 
     s_sprites.vel[i * 2 + 0]  = lerpf32(kvel0, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
     s_sprites.vel[i * 2 + 1]  = lerpf32(kvel1, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
 
-    s_sprites.col[i * 4 + 0]            = s_col_palettes[palette][0];
-    s_sprites.col[i * 4 + 1]            = s_col_palettes[palette][1];
-    s_sprites.col[i * 4 + 2]            = s_col_palettes[palette][2];
-    s_sprites.col[i * 4 + 3]            = s_col_palettes[palette][3];
+    s_sprites.col[i * 4 + 0]            = s_lover_col_palettes[palette][0];
+    s_sprites.col[i * 4 + 1]            = s_lover_col_palettes[palette][1];
+    s_sprites.col[i * 4 + 2]            = s_lover_col_palettes[palette][2];
+    s_sprites.col[i * 4 + 3]            = s_lover_col_palettes[palette][3];
 
     s_sprites.tile[i * 2 + 0]           = 0;
     s_sprites.tile[i * 2 + 1]           = 0;
@@ -342,18 +354,19 @@ void start(void) {
 
     s_sprites.state[i * 1 + 0].palette  = palette;
     s_sprites.state[i * 1 + 0].flags =
-      SPRITE_STATE_COLLIDE | SPRITE_STATE_MOVE | SPRITE_STATE_KEY;
+      SPRITE_STATE_COLLIDE | SPRITE_STATE_MOVE | SPRITE_STATE_LOVER;
   }
 
-  for (i32 idx = 0; idx < KEYS_COUNT; ++idx) {
-    i32 i       = idx + KEYHOLES_COUNT;
+  for (i32 idx = 0; idx < STRANGERS_COUNT; ++idx) {
+    i32 i       = idx + LOVERS_COUNT;
     f32 kvel0   = xorshift64(&vel_st) / (f32)U64_MAX;
     f32 kvel1   = xorshift64(&vel_st) / (f32)U64_MAX;
-    f32 k       = (f32)(idx + 0.5f) / KEYS_COUNT;
-    i32 palette = idx % PALETTE_COUNT;
+    f32 k       = (f32)(idx + 0.5f) / STRANGERS_COUNT;
+    i32 palette  = idx % PALETTE_COUNT;
 
-    s_sprites.pos[i * 3 + 0]          = bounds[0];
+    s_sprites.pos[i * 3 + 0]          = bounds[3];
     s_sprites.pos[i * 3 + 1]          = lerpf32(k, bounds[2], bounds[3]);
+
     s_sprites.pos[i * 3 + 2]          = (f32)i / SPRITES_COUNT;
 
     s_sprites.vel[i * 2 + 0]  = lerpf32(kvel0, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
@@ -373,6 +386,20 @@ void start(void) {
     s_sprites.state[i * 1 + 0].palette  = palette;
     s_sprites.state[i * 1 + 0].flags = SPRITE_STATE_COLLIDE | SPRITE_STATE_MOVE;
   }
+
+  EXPECT(LOVERS_COUNT > 0, "There has to be at least one lover.");
+
+  // TODO: debug
+  s_sprites.vel[0 * 2 + 0] = 0.0;
+  s_sprites.vel[0 * 2 + 1] = -1.0;
+  s_sprites.vel[1 * 2 + 0] = 0.0;
+  s_sprites.vel[1 * 2 + 1] = 1.0;
+
+  // First lover is player controlled
+  s_sprites.vel[PLAYER_IDX * 2 + 0] = 0.0f;
+  s_sprites.vel[PLAYER_IDX * 2 + 1] = 0.0f;
+  s_sprites.state[PLAYER_IDX].flags |= SPRITE_STATE_PLAYER;
+
   f32 fade_out_a = 0.0f;
 
   // Game loop
@@ -409,7 +436,7 @@ void start(void) {
 #endif
     // Update
     // Accumulate passed time and run simulation with fixed `SIM_TICK` dt
-    // Yeah, that's not great when we'r CPU bound.
+    // TODO: drop the frames
     sim_dt              += dt;
     i32 sim_tick_count  = sim_dt / SIM_TICK;
     sim_dt              = sim_dt - sim_tick_count * SIM_TICK;
@@ -467,15 +494,20 @@ void start(void) {
             // Respawn
             f32 kpos0   = xorshift64(&pos_st) / (f32)U64_MAX;
             f32 kpos1   = xorshift64(&pos_st) / (f32)U64_MAX;
+            f32 kvel0   = xorshift64(&vel_st) / (f32)U64_MAX;
+            f32 kvel1   = xorshift64(&vel_st) / (f32)U64_MAX;
             pos[0]      = lerpf32(kpos0, bounds[0], bounds[1]);
             pos[1]      = lerpf32(kpos1, bounds[2], bounds[3]);
+            vel[0]      = lerpf32(kvel0, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
+            vel[1]      = lerpf32(kvel1, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
             scale[0]    = 1.0f;
             scale[1]    = 1.0f;
             col[0]      = s_col_palettes[state.palette][0];
             col[1]      = s_col_palettes[state.palette][1];
             col[2]      = s_col_palettes[state.palette][2];
             col[3]      = 0.15f;
-            state.flags = (state.flags & SPRITE_STATE_KEY) |
+            state.flags =
+              (state.flags & (SPRITE_STATE_LOVER | SPRITE_STATE_PLAYER)) |
               SPRITE_STATE_COLLIDE | SPRITE_STATE_MOVE | SPRITE_STATE_FADE_IN;
           }
         }
@@ -519,9 +551,6 @@ void start(void) {
           f32 depth;
           f32 dlen;
           f32 dlen2;
-          f32 dotdvel0;
-          f32 dotdvel1;
-          f32 dvel[2];
 
           state1    = s_sprites.state[j * 1 + 0];
           pos1[0]   = s_sprites.pos[j * 3 + 0];
@@ -541,14 +570,13 @@ void start(void) {
           dlen2     = d[0] * d[0] + d[1] * d[1];
 
           if (dlen2 < radii2) {
-            // Key and keyhole of the same pelette merge, the rest collide
-            b32 match_palettes = state0.palette == state1.palette;
-            b32 match_key_and_keyhole = is_bit_set(state0.flags ^ state1.flags,
-                SPRITE_STATE_KEY);
+            // Lovers merge, the rest collide
+            b32 match_lovers = is_bit_set(state0.flags & state1.flags,
+                SPRITE_STATE_LOVER);
             b32 close_to_match = dlen2 < match_radii2;
 
-            if (match_palettes && match_key_and_keyhole) {
-              // Matching key and keyhole
+            if (match_lovers) {
+              // Matching lovers
               if (close_to_match) {
                 s_sprites.state[i * 1 + 0].flags |=   SPRITE_STATE_SCALE;
                 s_sprites.state[j * 1 + 0].flags |=   SPRITE_STATE_SCALE;
@@ -573,18 +601,6 @@ void start(void) {
               pos0[1]  += dunit[1] * depth * -0.5;
               pos1[0]  += dunit[0] * depth *  0.5;
               pos1[1]  += dunit[1] * depth *  0.5;
-
-              // Ellastic collision
-              dotdvel0  = dunit[0] * vel0[0] + dunit[1] * vel0[1];
-              dotdvel1  = dunit[0] * vel1[0] + dunit[1] * vel1[1];
-
-              dvel[0]   = dunit[0] * (dotdvel1 - dotdvel0);
-              dvel[1]   = dunit[1] * (dotdvel1 - dotdvel0);
-
-              vel0[0]   += dvel[0];
-              vel0[1]   += dvel[1];
-              vel1[0]   -= dvel[0];
-              vel1[1]   -= dvel[1];
             }
           }
 
@@ -599,13 +615,32 @@ void start(void) {
           s_sprites.vel[j * 2 + 1]        = vel1[1];
         }
       }
+
+      // Player controls
+      f32 vel[2];
+      vel[0] = s_sprites.vel[PLAYER_IDX * 2 + 0];
+      vel[1] = s_sprites.vel[PLAYER_IDX * 2 + 1];
+      // dampen
+      vel[0] *= 0.95; // TODO: pow of SIM_TICK
+      vel[1] *= 0.95;
+
+      // TODO: figure out keycodes
+      if (loop.keycodes.e[KC_SPACE]) {
+        vel[0] += 2.0f * SIM_TICK;
+        vel[1] += 2.0f * SIM_TICK;
+      }
+
+      vel[0] = clampf32(vel[0], -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
+      vel[1] = clampf32(vel[1], -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
+      s_sprites.vel[PLAYER_IDX * 2 + 0] = vel[0];
+      s_sprites.vel[PLAYER_IDX * 2 + 1] = vel[1];
     }
 
     // Draw
-    glClearColor(0.0f, 0.0f, 0.0f, fade_out_a);
+    glClearColor(0.34, 0.44f, 0.25, fade_out_a);
     glClear(GL_COLOR_BUFFER_BIT);
     glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
     // Draw sprites
     glBindBuffer(GL_ARRAY_BUFFER, pos_bo);
