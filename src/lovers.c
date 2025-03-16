@@ -61,11 +61,10 @@ static const f32 s_col_palettes[PALETTE_COUNT][4] = {
   RGBA_F32x4(0x631A86FF),
   RGBA_F32x4(0xF45866FF),
   // Stranger
-  RGBA_F32x4(0x355070FF),
-  RGBA_F32x4(0x6D597AFF),
-  RGBA_F32x4(0x6D597AFF),
-  RGBA_F32x4(0xE56B6FFF),
-  RGBA_F32x4(0xEAAC8BFF),
+  RGBA_F32x4(0x355060FF),
+  RGBA_F32x4(0x6D5962FF),
+  RGBA_F32x4(0xA56B6FFF),
+  RGBA_F32x4(0xDAAC8BFF),
 };
 
 struct sprites {
@@ -360,7 +359,8 @@ void start(void) {
     f32 kvel0   = xorshift64(&vel_st) / (f32)U64_MAX;
     f32 kvel1   = xorshift64(&vel_st) / (f32)U64_MAX;
     f32 k       = (f32)(idx + 0.5f) / STRANGERS_COUNT;
-    i32 palette  = idx % PALETTE_COUNT;
+    i32 palette =
+      LOVER_PALETTE_COUNT + idx % (PALETTE_COUNT - LOVER_PALETTE_COUNT);
 
     s_sprites.pos[i * 3 + 0]          = bounds[3];
     s_sprites.pos[i * 3 + 1]          = lerpf32(k, bounds[2], bounds[3]);
