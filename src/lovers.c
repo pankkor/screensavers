@@ -10,7 +10,6 @@
 #include "common.h"
 
 // TODO:
-// - Keyboard input for player
 // - Change sprites
 // - Change direction of strangers from time to time
 // - Lover 2 escapes
@@ -55,19 +54,18 @@ enum game_state {
   ((hex & 0x000000FF) >> 0)  / 255.0f,                                         \
 }
 
-enum {PALETTE_COUNT = 5};
+enum {LOVER_PALETTE_COUNT = 2};
+enum {PALETTE_COUNT = 7};
 static const f32 s_col_palettes[PALETTE_COUNT][4] = {
+  // Lover
+  RGBA_F32x4(0x631A86FF),
+  RGBA_F32x4(0xF45866FF),
+  // Stranger
   RGBA_F32x4(0x355070FF),
   RGBA_F32x4(0x6D597AFF),
   RGBA_F32x4(0x6D597AFF),
   RGBA_F32x4(0xE56B6FFF),
   RGBA_F32x4(0xEAAC8BFF),
-};
-
-enum {LOVER_PALETTE_COUNT = 2};
-static const f32 s_lover_col_palettes[LOVER_PALETTE_COUNT][4] = {
-  RGBA_F32x4(0x631A86FF),
-  RGBA_F32x4(0xF45866FF),
 };
 
 struct sprites {
@@ -341,10 +339,10 @@ void start(void) {
     s_sprites.vel[i * 2 + 0]  = lerpf32(kvel0, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
     s_sprites.vel[i * 2 + 1]  = lerpf32(kvel1, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
 
-    s_sprites.col[i * 4 + 0]            = s_lover_col_palettes[palette][0];
-    s_sprites.col[i * 4 + 1]            = s_lover_col_palettes[palette][1];
-    s_sprites.col[i * 4 + 2]            = s_lover_col_palettes[palette][2];
-    s_sprites.col[i * 4 + 3]            = s_lover_col_palettes[palette][3];
+    s_sprites.col[i * 4 + 0]            = s_col_palettes[palette][0];
+    s_sprites.col[i * 4 + 1]            = s_col_palettes[palette][1];
+    s_sprites.col[i * 4 + 2]            = s_col_palettes[palette][2];
+    s_sprites.col[i * 4 + 3]            = s_col_palettes[palette][3];
 
     s_sprites.tile[i * 2 + 0]           = 0;
     s_sprites.tile[i * 2 + 1]           = 0;
@@ -489,7 +487,7 @@ void start(void) {
         }
 
         if (is_bit_set(state.flags, SPRITE_STATE_FADE_OUT)) {
-          col[3] *= 0.94f;
+          col[3] *= 0.75f;
           if (col[3] < 0.001f) {
             // Respawn
             f32 kpos0   = xorshift64(&pos_st) / (f32)U64_MAX;
@@ -617,17 +615,25 @@ void start(void) {
       }
 
       // Player controls
+      f32 PLAYER_CONTROL_VEL = 2.0f * SIM_TICK;
       f32 vel[2];
       vel[0] = s_sprites.vel[PLAYER_IDX * 2 + 0];
       vel[1] = s_sprites.vel[PLAYER_IDX * 2 + 1];
-      // dampen
-      vel[0] *= 0.95; // TODO: pow of SIM_TICK
+      // Dampen
+      vel[0] *= 0.95; // TODO: powf32 SIM_TICK
       vel[1] *= 0.95;
 
-      // TODO: figure out keycodes
-      if (loop.keycodes.e[KC_SPACE]) {
-        vel[0] += 2.0f * SIM_TICK;
-        vel[1] += 2.0f * SIM_TICK;
+      if (loop.keycodes.e[KC_LEFT]) {
+        vel[0] -= PLAYER_CONTROL_VEL;
+      }
+      if (loop.keycodes.e[KC_RIGHT]) {
+        vel[0] += PLAYER_CONTROL_VEL;
+      }
+      if (loop.keycodes.e[KC_DOWN]) {
+        vel[1] -= PLAYER_CONTROL_VEL;
+      }
+      if (loop.keycodes.e[KC_UP]) {
+        vel[1] += PLAYER_CONTROL_VEL;
       }
 
       vel[0] = clampf32(vel[0], -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
