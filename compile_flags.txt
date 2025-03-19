@@ -6,11 +6,11 @@
 -Wno-gnu-statement-expression-from-macro-expansion
 -Wno-unused-function
 -O1
+-mcpu=native
 -g
 -fno-builtin
 -nostdlib
 -e _start
--mcpu=native
 -framework OpenGL
 -framework CoreGraphics
 -framework ApplicationServices
