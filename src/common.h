@@ -20,6 +20,7 @@ typedef i32                 b32;
 #define FORCE_INLINE        inline __attribute__((always_inline))
 #define NO_RETURN           __attribute__((noreturn))
 #define ALIGNED(x)          __attribute__((aligned(x)))
+#define ARRAY_COUNT(x)      (i64)(sizeof(x) / sizeof(x[0]))
 
 #define SWAP(a, b)                                                             \
   do {                                                                         \
@@ -86,7 +87,7 @@ extern CGError CGSOrderWindow(CGSConnectionID cid, CGWindowID wid,
 extern CGError CGSSetWindowOpacity(CGSConnectionID cid, CGWindowID wid,
     bool isOpaque);
 
-extern CGError CGSSetWindowTags (const CGSConnectionID cid, CGWindowID wid,
+extern CGError CGSSetWindowTags(const CGSConnectionID cid, CGWindowID wid,
     int *tag, int tagSize); // tag could be i32 or i64 with tagSize 32 or 64
 
 extern CGError CGSAddSurface(CGSConnectionID cid, CGWindowID wid,
@@ -537,17 +538,21 @@ static void window_init(struct window *w, b32 is_full_screen) {
     CGContextClearRect(cgctx, view_rect);
     CGContextRelease(cgctx);
 
-    cg_err = CGSSetWindowLevel(cid, wid, kCGMaximumWindowLevel);
+    b32 is_dock_and_desktop_control_visile = 0;
+    CGWindowLevel w_level = is_dock_and_desktop_control_visile
+      ? kCGUtilityWindowLevel - 1
+      : kCGMaximumWindowLevel;
+    cg_err = CGSSetWindowLevel(cid, wid, w_level);
     EXPECT(!cg_err, "CGSSetWindowLevel() failed\n");
 
     cg_err = CGSSetWindowOpacity(cid, wid, 0);
     EXPECT(!cg_err, "CGSSetWindowOpacity() failed\n");
 
-    i32 tags[] = {
-      0x0200, // pass through mouse clicks
+    i32 w_tags[] = {
+      // 0x0200, // pass through mouse clicks
       0,      // 0 terminator
     };
-    cg_err = CGSSetWindowTags(cid, wid, tags, sizeof(tags[0]) * 8);
+    cg_err = CGSSetWindowTags(cid, wid, w_tags, sizeof(w_tags[0]) * 8);
     EXPECT(!cg_err, "CGSSetWindowTags() failed\n");
 
     // make window appear
@@ -556,8 +561,9 @@ static void window_init(struct window *w, b32 is_full_screen) {
   }
 
 #if 0
+  // TODO: test with multiple monitors
   // Add window to the active Workspace.
-  // This uses CFArray and CFNumber and requires to link with
+  // This uses CFArray and CFNumber and requires linking with
   //   -framework CoreFoundation
   CGSSpaceID spid = CGSGetActiveSpace(cid);
   const void *spid_num  = (void *)CFNumberCreate(0, kCFNumberIntType, &spid);
@@ -658,21 +664,25 @@ static i32 window_flush(struct window *w) {
 // --------------------------------------
 // Event Loop
 // --------------------------------------
-
 // Key Codes. Direct mapping to kVK_* virutal keycodes.
 // All virtual keycode constants are defined in HIToolbox/Events.h
 // #include <Carbon/Carbon.h>
 // and go to definition of kVK_Escape
 enum KC : u8 {
-  KC_RET    = 0x24,
-  KC_TAB    = 0x30,
-  KC_SPACE  = 0x31,
-  KC_DEL    = 0x33,
-  KC_ESC    = 0x35,
-  KC_LEFT   = 0x7B,
-  KC_RIGHT  = 0x7C,
-  KC_DOWN   = 0x7D,
-  KC_UP     = 0x7E,
+  KC_RET      = 0x24,
+  KC_TAB      = 0x30,
+  KC_SPACE    = 0x31,
+  KC_DEL      = 0x33,
+  KC_ESC      = 0x35,
+  KC_COMMAND  = 0x37,
+  KC_SHIFT    = 0x38,
+  KC_CAPSLOCK = 0x39,
+  KC_OPTION   = 0x3A,
+  KC_CONTROL  = 0x3B,
+  KC_LEFT     = 0x7B,
+  KC_RIGHT    = 0x7C,
+  KC_DOWN     = 0x7D,
+  KC_UP       = 0x7E,
 
   KC_SENTINEL, // keep it the biggest value in the enum
 };
@@ -691,6 +701,25 @@ struct event_loop {
   CFRunLoopRef        runloop;
 };
 
+u8 s_map_keycodes[] = {
+  KC_SHIFT,
+  KC_CONTROL,
+  KC_OPTION,
+  KC_COMMAND,
+  KC_SHIFT,
+  KC_CAPSLOCK,
+};
+int s_map_flags[] = {
+  kCGEventFlagMaskShift,
+  kCGEventFlagMaskControl,
+  kCGEventFlagMaskAlternate,
+  kCGEventFlagMaskCommand,
+  kCGEventFlagMaskShift,
+  kCGEventFlagMaskAlphaShift,
+};
+static_assert(ARRAY_COUNT(s_map_keycodes) == ARRAY_COUNT(s_map_flags),
+    "s_map_keycodes size shall match s_map_flags size");
+
 static CGEventRef event_handler(CGEventTapProxy proxy, CGEventType type,
     CGEventRef event, void *userdata)
 {
@@ -698,6 +727,7 @@ static CGEventRef event_handler(CGEventTapProxy proxy, CGEventType type,
 
   struct event_loop *loop = userdata;
   CGKeyCode keycode;
+  CGEventFlags flags;
 
   switch (type)
   {
@@ -708,10 +738,21 @@ static CGEventRef event_handler(CGEventTapProxy proxy, CGEventType type,
 
     case kCGEventKeyDown:
     case kCGEventKeyUp:
+      // Keycodes
       keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
       WARN_IF(keycode >= KC_SIZE, "keycode value >= 256");
       if (keycode < KC_SIZE) {
         loop->keycodes.e[keycode] = type == kCGEventKeyDown;
+      }
+      // fallthrough
+    case kCGEventFlagsChanged:
+      // Modifier flags
+      flags = CGEventGetFlags(event);
+      for (i32 i = 0; i < ARRAY_COUNT(s_map_keycodes); ++i) {
+        if (flags & s_map_flags[i]) {
+          u8 flag_keycode = s_map_keycodes[i];
+          loop->keycodes.e[flag_keycode] = type == kCGEventKeyDown;
+        }
       }
       break;
 
@@ -719,6 +760,18 @@ static CGEventRef event_handler(CGEventTapProxy proxy, CGEventType type,
       WARN_IF(1, "Unhandled event type");
       break;
   }
+
+#if 1
+    // We swallow all the touches. As a precaution monitor Cmd+Opt+Esc for
+    // emergency exit.
+    if (loop->keycodes.e[KC_COMMAND] &&
+        loop->keycodes.e[KC_OPTION] &&
+        loop->keycodes.e[KC_ESC]) {
+      print_cstr(STDERR, "Emergency exit!\n");
+      exit(1);
+    }
+#endif
+
   // By not returning `event` we swallow it
   return 0;
 }
@@ -730,7 +783,8 @@ static void event_loop_init(struct event_loop *loop) {
   CFRunLoopSourceRef  source;
   CFRunLoopRef        runloop;
 
-  event_mask  = (1 << kCGEventKeyDown) | (1 << kCGEventKeyUp);
+  event_mask  = (1 << kCGEventKeyDown) | (1 << kCGEventKeyUp)
+    | (1 << kCGEventFlagsChanged);
   event_tap   = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
       kCGEventTapOptionDefault, event_mask, event_handler, loop);
   EXPECT(event_tap, "CGEventTapCreate() failed");
