@@ -1,4 +1,4 @@
-// Connect two lovers.
+// Find your lovers.
 //
 // Platforms
 //   macOS AArch64
@@ -10,13 +10,13 @@
 #include "common.h"
 
 // TODO:
-// - Change animation frames
 // - Generate sprite vertices based on gl_VertexID
 // - Change direction of strangers from time to time
 // - Lover 2 escapes
 //
 // DONE:
 // + Change sprites (Tex2dArray)
+// + Change animation frames
 
 // --------------------------------------
 // Config
@@ -26,10 +26,17 @@
 #define SPRITE_VEL_MAX            0.5f
 #define SPRITE_SIZE               0.2f
 #define SPRITE_SIZE_05            (SPRITE_SIZE * 0.6f)
-#define SPRITE_COLLISION_SIZE_05  (SPRITE_SIZE_05 * 0.6f)
+#define SPRITE_COLLISION_SIZE_05  (SPRITE_SIZE_05 * 0.4f)
 #define SPRITE_SCALE_VEL          0.1f
 
-enum {SPRITES_COUNT = 48};
+enum {
+  SPRITES_COUNT = 128,
+  LOVERS_COUNT = 2,
+  STRANGERS_COUNT = SPRITES_COUNT - LOVERS_COUNT,
+};
+enum {PLAYER_IDX = 0};   // player is lover #0
+
+static_assert(SPRITES_COUNT >= LOVERS_COUNT, "Lovers are subset of sprites");
 
 enum sprite_flag : u16 {
   // Flags
@@ -40,6 +47,7 @@ enum sprite_flag : u16 {
   SPRITE_STATE_FADE_OUT   = 1 << 5,
   SPRITE_STATE_LOVER      = 1 << 6, // 0 - STRANGER, 1 - LOVER
   SPRITE_STATE_PLAYER     = 1 << 7, // 0 - STRANGER, 1 - LOVER
+  SPRITE_STATE_HIDDEN     = 1 << 8,
 };
 
 struct sprite_state {
@@ -73,16 +81,18 @@ static const f32 s_col_palettes[PALETTE_COUNT][4] = {
 };
 
 struct sprites {
+  ALIGNED(16) f32                 pos_prev  [3 * SPRITES_COUNT]; // update
   ALIGNED(16) f32                 pos       [3 * SPRITES_COUNT]; // update, draw
   ALIGNED(16) f32                 vel       [2 * SPRITES_COUNT]; // update
   ALIGNED(16) f32                 col       [4 * SPRITES_COUNT]; // update, draw
   ALIGNED(16) f32                 scale     [2 * SPRITES_COUNT]; // update, draw
+  ALIGNED(16) f32                 scale_u   [1 * SPRITES_COUNT]; // update, draw
   ALIGNED(16) i32                 palette   [1 * SPRITES_COUNT]; // update
   ALIGNED(16) struct sprite_state state     [1 * SPRITES_COUNT]; // update
   // Animations
   ALIGNED(16) i32                 anim_level[1 * SPRITES_COUNT]; // update, draw
   ALIGNED(16) i32                 anim_idx  [1 * SPRITES_COUNT]; // update
-  ALIGNED(16) f32                 anim_t    [2 * SPRITES_COUNT]; // update
+  ALIGNED(16) f32                 anim_t    [1 * SPRITES_COUNT]; // update
 };
 
 struct sprites s_sprites;
@@ -97,6 +107,7 @@ layout(location = 1) in vec3  v_pos;                                           \
 layout(location = 2) in vec4  v_col;                                           \
 layout(location = 3) in vec2  v_scale;                                         \
 layout(location = 4) in ivec2 v_tile_level;                                    \
+layout(location = 5) in float v_scale_u;                                       \
                                                                                \
 uniform float iaspect;                                                         \
                                                                                \
@@ -108,7 +119,7 @@ void main(void) {                                                              \
   pos.x *= iaspect;                                                            \
   gl_Position = vec4(pos, 1.0);                                                \
   f_col = v_col;                                                               \
-  f_uvw = vec3(v_vertuv.zw, v_tile_level);                                     \
+  f_uvw = vec3(v_vertuv.z * v_scale_u, v_vertuv.w, v_tile_level);              \
 }                                                                              \
 ";
 
@@ -126,7 +137,7 @@ void main(void) {                                                              \
     int ia = int(t.a * 255.0);                                                 \
     int ia_msb = (ia & 0x80) >> 7;                                             \
     vec3 c = ia_msb > 0 ? f_col.rgb : t.rgb;                                   \
-    float a = (t.a == 0.0f ? 0.0f : t.a * 2.0f) * f_col.a;                     \
+    float a = (t.a == 0.0f ? 0.0f : t.a * 2.0) * f_col.a;                      \
     frag_col = vec4(c * a, a);                                                 \
 }                                                                              \
 ";
@@ -163,7 +174,8 @@ enum {
   TILE_LEVEL_COUNT = 8, // Don't forget to change s_anims when modifying
 };
 
-// 32x32 ARGB8 tiles (A[0] - color mask, A[1-7] - alpha, RGB - color)
+// 32x32 RGBA8 tiles (A[0] - color mask, A[1-7] - alpha, RGB - color)
+// Little endian colors: 0xA8B8G8R8
 static const u32 s_tilemap_data[TILE_W * TILE_H * TILE_LEVEL_COUNT] = {
   // Level 0: stranger frame 0
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
@@ -462,12 +474,14 @@ void start(void) {
   GLuint col_bo;
   GLuint scale_bo;
   GLuint tile_level_bo;
+  GLuint scale_u_bo;
   glGenVertexArrays(1, &vao);
   glGenBuffers(1, &vert_bo);
   glGenBuffers(1, &pos_bo);
   glGenBuffers(1, &col_bo);
   glGenBuffers(1, &scale_bo);
   glGenBuffers(1, &tile_level_bo);
+  glGenBuffers(1, &scale_u_bo);
 
   GLfloat sprite_verts[] = {
     -SPRITE_SIZE_05, -SPRITE_SIZE_05, 0.0f, 1.0f,
@@ -528,6 +542,12 @@ void start(void) {
   glVertexAttribDivisor(4, 1);
   glEnableVertexAttribArray(4);
 
+  glBindBuffer(GL_ARRAY_BUFFER, scale_u_bo);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(s_sprites.scale_u), s_sprites.scale_u,
+      GL_STATIC_DRAW);
+  glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, 0, 0);
+  glVertexAttribDivisor(5, 1);
+  glEnableVertexAttribArray(5);
   // Logic
   // Scale bounds normalized to [-1;1] to match monitor aspect ratio
   f32 bounds[4] = {
@@ -541,10 +561,6 @@ void start(void) {
   struct xorshift64_state pos_st  = {815936748814573};
 
   // Spawn
-  i32 PLAYER_IDX = 0;   // player is lover #1
-  i32 LOVERS_COUNT = 2;
-  i32 STRANGERS_COUNT = SPRITES_COUNT - LOVERS_COUNT;
-
   for (i32 idx = 0; idx < LOVERS_COUNT; ++idx) {
     i32 i       = idx;
     i32 palette = idx % LOVER_PALETTE_COUNT;
@@ -599,7 +615,8 @@ void start(void) {
     s_sprites.state[i * 1 + 0].flags = SPRITE_STATE_COLLIDE | SPRITE_STATE_MOVE;
   }
 
-  EXPECT(LOVERS_COUNT > 0, "There has to be at least one lover.");
+  EXPECT(SPRITES_COUNT >= LOVERS_COUNT, "There has to be at least one lover.");
+  EXPECT(SPRITES_COUNT > 0, "There has to be at least 1 sprite");
 
   // Lovers start at borders facing each other
   s_sprites.pos[1 * 3 + 0] = bounds[1];
@@ -654,6 +671,14 @@ void start(void) {
     sim_dt              = sim_dt - sim_tick_count * SIM_TICK;
 
     for (i32 sim_tick = 0; sim_tick < sim_tick_count; ++sim_tick) {
+      // Keyboard Input
+      // Step through event loop once, updating input events
+      event_loop_step(&loop);
+
+      // ESC to exit
+      if (loop.keycodes.e[KC_ESC]) {
+        goto shutdown;
+      }
       // Player controls
       f32 PLAYER_CONTROL_VEL = 2.0f * SIM_TICK;
       f32 vel[2];
@@ -682,109 +707,6 @@ void start(void) {
       s_sprites.vel[PLAYER_IDX * 2 + 1] = vel[1];
 
       fade_out_a = clampf32(fade_out_a + 1.0f * SIM_TICK, 0.0f, 1.0f);
-
-      for (i32 i = 0; i < SPRITES_COUNT; ++i) {
-        // Scale, fade, bounds collision
-        struct sprite_state state;
-        f32 pos[2];
-        f32 vel[2];
-        f32 col[4];
-        f32 scale[2];
-        i32 dmask[2];
-        // Animaiton
-        i32 anim_idx;
-        f32 anim_t;
-        f32 anim_dt = 0; // anim_dt will be scaled according to animation fps
-
-        state           = s_sprites.state[i * 1 + 0];
-        pos[0]          = s_sprites.pos[i * 3 + 0];
-        pos[1]          = s_sprites.pos[i * 3 + 1];
-        vel[0]          = s_sprites.vel[i * 2 + 0];
-        vel[1]          = s_sprites.vel[i * 2 + 1];
-        col[0]          = s_sprites.col[i * 4 + 0];
-        col[1]          = s_sprites.col[i * 4 + 1];
-        col[2]          = s_sprites.col[i * 4 + 2];
-        col[3]          = s_sprites.col[i * 4 + 3];
-        scale[0]        = s_sprites.scale[i * 2 + 0];
-        scale[1]        = s_sprites.scale[i * 2 + 1];
-
-        anim_idx        = s_sprites.anim_idx[i * 1 + 0];
-        anim_t          = s_sprites.anim_t[i * 1 + 0];
-
-        if (is_bit_set(state.flags, SPRITE_STATE_MOVE)) {
-          pos[0]        += vel[0] * SIM_TICK;
-          pos[1]        += vel[1] * SIM_TICK;
-          // Change direction on colliding with bounds
-          dmask[0]      = pos[0] < bounds[0] || pos[0] > bounds[1];
-          dmask[1]      = pos[1] < bounds[2] || pos[1] > bounds[3];
-          vel[0]        *= (1 - (dmask[0] << 1));
-          vel[1]        *= (1 - (dmask[1] << 1));
-          pos[0]        = clampf32(pos[0], bounds[0], bounds[1]);
-          pos[1]        = clampf32(pos[1], bounds[2], bounds[3]);
-
-          // Animation: advance animation faster with faster veolcity
-          anim_dt = SIM_TICK * sqrtf32(vel[0] * vel[0] + vel[1] * vel[1]);
-        } else {
-          // Animation: stand still if not moving
-          anim_t = 0; // t == 0 -> frame == 0 -> standing still
-        }
-
-        if (is_bit_set(state.flags, SPRITE_STATE_SCALE)) {
-          scale[0]      += SPRITE_SCALE_VEL;
-          scale[1]      += SPRITE_SCALE_VEL;
-        }
-
-        if (is_bit_set(state.flags, SPRITE_STATE_FADE_IN)) {
-          col[3] *= 1.08f;
-          if (col[3] >= 1.0f) {
-            state.flags &= ~SPRITE_STATE_FADE_IN;
-          }
-        }
-
-        if (is_bit_set(state.flags, SPRITE_STATE_FADE_OUT)) {
-          col[3] *= 0.75f;
-          if (col[3] < 0.001f) {
-            // Respawn
-            f32 kpos0   = xorshift64(&pos_st) / (f32)U64_MAX;
-            f32 kpos1   = xorshift64(&pos_st) / (f32)U64_MAX;
-            f32 kvel0   = xorshift64(&vel_st) / (f32)U64_MAX;
-            f32 kvel1   = xorshift64(&vel_st) / (f32)U64_MAX;
-            pos[0]      = lerpf32(kpos0, bounds[0], bounds[1]);
-            pos[1]      = lerpf32(kpos1, bounds[2], bounds[3]);
-            vel[0]      = lerpf32(kvel0, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
-            vel[1]      = lerpf32(kvel1, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
-            scale[0]    = 1.0f;
-            scale[1]    = 1.0f;
-            col[0]      = s_col_palettes[state.palette][0];
-            col[1]      = s_col_palettes[state.palette][1];
-            col[2]      = s_col_palettes[state.palette][2];
-            col[3]      = 0.15f;
-            state.flags =
-              (state.flags & (SPRITE_STATE_LOVER | SPRITE_STATE_PLAYER)) |
-              SPRITE_STATE_COLLIDE | SPRITE_STATE_MOVE | SPRITE_STATE_FADE_IN;
-          }
-        }
-        col[3] = clampf32(col[3], 0.0f, 1.0f);
-
-        // Animation tile calcualtion
-        struct anim anim = s_anims[anim_idx];
-        anim_t = fmodf32(anim_t + anim_dt * anim.fps, 1.0f);
-        i32 anim_level = anim.offset + anim_t * (anim.count - 1);
-
-        s_sprites.pos[i * 3 + 0]        = pos[0];
-        s_sprites.pos[i * 3 + 1]        = pos[1];
-        s_sprites.vel[i * 2 + 0]        = vel[0];
-        s_sprites.vel[i * 2 + 1]        = vel[1];
-        s_sprites.col[i * 4 + 0]        = col[0];
-        s_sprites.col[i * 4 + 1]        = col[1];
-        s_sprites.col[i * 4 + 2]        = col[2];
-        s_sprites.col[i * 4 + 3]        = col[3];
-        s_sprites.scale[i * 2 + 0]      = scale[0];
-        s_sprites.scale[i * 2 + 1]      = scale[1];
-        s_sprites.state[i * 1 + 0]      = state;
-        s_sprites.anim_level[i * 1 + 0] = anim_level;
-        s_sprites.anim_t[i * 1 + 0]     = anim_t;
-      }
 
       // Circle collisions
       f32 radii         = SPRITE_COLLISION_SIZE_05 + SPRITE_COLLISION_SIZE_05;
@@ -875,6 +797,136 @@ void start(void) {
           s_sprites.vel[j * 2 + 1]        = vel1[1];
         }
       }
+
+      for (i32 i = 0; i < SPRITES_COUNT; ++i) {
+        // Scale, fade, bounds collision
+        struct sprite_state state;
+        f32 pos_prev[2];
+        f32 pos[2];
+        f32 vel[2];
+        f32 col[4];
+        f32 scale[2];
+        f32 scale_u;
+        i32 dmask[2];
+        // Animaiton
+        i32 anim_idx;
+        f32 anim_t;
+        f32 anim_dt = 0; // anim_dt will be scaled according to animation fps
+
+        state           = s_sprites.state[i * 1 + 0];
+        pos_prev[0]     = s_sprites.pos_prev[i * 3 + 0];
+        pos_prev[1]     = s_sprites.pos_prev[i * 3 + 1];
+        pos[0]          = s_sprites.pos[i * 3 + 0];
+        pos[1]          = s_sprites.pos[i * 3 + 1];
+        vel[0]          = s_sprites.vel[i * 2 + 0];
+        vel[1]          = s_sprites.vel[i * 2 + 1];
+        col[0]          = s_sprites.col[i * 4 + 0];
+        col[1]          = s_sprites.col[i * 4 + 1];
+        col[2]          = s_sprites.col[i * 4 + 2];
+        col[3]          = s_sprites.col[i * 4 + 3];
+        scale[0]        = s_sprites.scale[i * 2 + 0];
+        scale[1]        = s_sprites.scale[i * 2 + 1];
+        scale_u         = s_sprites.scale_u[i * 1 + 0];
+
+        anim_idx        = s_sprites.anim_idx[i * 1 + 0];
+        anim_t          = s_sprites.anim_t[i * 1 + 0];
+
+        if (is_bit_set(state.flags, SPRITE_STATE_MOVE)) {
+          pos[0]        += vel[0] * SIM_TICK;
+          pos[1]        += vel[1] * SIM_TICK;
+          // Change direction on colliding with bounds
+          dmask[0]      = pos[0] < bounds[0] || pos[0] > bounds[1];
+          dmask[1]      = pos[1] < bounds[2] || pos[1] > bounds[3];
+          vel[0]        *= (1 - (dmask[0] << 1));
+          vel[1]        *= (1 - (dmask[1] << 1));
+          pos[0]        = clampf32(pos[0], bounds[0], bounds[1]);
+          pos[1]        = clampf32(pos[1], bounds[2], bounds[3]);
+
+          scale_u       = vel[0] < 0.0f ? -1.0f : 1.0f;
+
+          // Change direction on colliding with bounds
+          dmask[0]      = pos[0] < bounds[0] || pos[0] > bounds[1];
+          dmask[1]      = pos[1] < bounds[2] || pos[1] > bounds[3];
+        }
+
+        if (is_bit_set(state.flags, SPRITE_STATE_SCALE)) {
+          scale[0]      += SPRITE_SCALE_VEL;
+          scale[1]      += SPRITE_SCALE_VEL;
+        }
+
+        if (is_bit_set(state.flags, SPRITE_STATE_FADE_IN)) {
+          col[3] *= 1.08f;
+          if (col[3] >= 1.0f) {
+            state.flags &= ~SPRITE_STATE_FADE_IN;
+          }
+        }
+
+        if (is_bit_set(state.flags, SPRITE_STATE_FADE_OUT)) {
+          col[3] *= 0.75f;
+          if (col[3] < 0.001f) {
+            // Respawn
+            f32 kpos0   = xorshift64(&pos_st) / (f32)U64_MAX;
+            f32 kpos1   = xorshift64(&pos_st) / (f32)U64_MAX;
+            f32 kvel0   = xorshift64(&vel_st) / (f32)U64_MAX;
+            f32 kvel1   = xorshift64(&vel_st) / (f32)U64_MAX;
+            pos[0]      = lerpf32(kpos0, bounds[0], bounds[1]);
+            pos[1]      = lerpf32(kpos1, bounds[2], bounds[3]);
+            vel[0]      = lerpf32(kvel0, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
+            vel[1]      = lerpf32(kvel1, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
+            scale[0]    = 1.0f;
+            scale[1]    = 1.0f;
+            col[0]      = s_col_palettes[state.palette][0];
+            col[1]      = s_col_palettes[state.palette][1];
+            col[2]      = s_col_palettes[state.palette][2];
+            col[3]      = 0.15f;
+            state.flags =
+              (state.flags & (SPRITE_STATE_LOVER | SPRITE_STATE_PLAYER)) |
+              SPRITE_STATE_COLLIDE | SPRITE_STATE_MOVE | SPRITE_STATE_FADE_IN;
+          }
+        }
+        col[3] = clampf32(col[3], 0.0f, 1.0f);
+
+        // Animation tile calcualtion
+
+        // Animate walk animation even when simple repulsion is in action
+        // (there is no velocity involved)
+        f32 dposdt[2]; // velocity calculated from position change in this frame
+        dposdt[0] = (pos[0] - pos_prev[0]) / SIM_TICK;
+        dposdt[1] = (pos[1] - pos_prev[1]) / SIM_TICK;
+
+        f32 abs_dposdt = sqrtf32(dposdt[0] * dposdt[0] + dposdt[1] * dposdt[1]);
+        // Only based on X velocity
+        scale_u = dposdt[0] > -0.1f && dposdt[0] < 0.1f
+          ? scale_u
+          : dposdt[0] > 0.1 ? 1.0f : -1.0f;
+
+        anim_dt = SIM_TICK * abs_dposdt;
+        if (abs_dposdt < 0.001f) {
+          anim_dt = 0.0f;
+          anim_t = 0.0f; // t == 0 -> frame == 0 -> standing still
+        }
+
+        struct anim anim = s_anims[anim_idx];
+        anim_t = fmodf32(anim_t + anim_dt * anim.fps, 1.0f);
+        i32 anim_level = anim.offset + anim_t * anim.count;
+
+        s_sprites.pos_prev[i * 3 + 0]   = pos[0];
+        s_sprites.pos_prev[i * 3 + 1]   = pos[1];
+        s_sprites.pos[i * 3 + 0]        = pos[0];
+        s_sprites.pos[i * 3 + 1]        = pos[1];
+        s_sprites.vel[i * 2 + 0]        = vel[0];
+        s_sprites.vel[i * 2 + 1]        = vel[1];
+        s_sprites.col[i * 4 + 0]        = col[0];
+        s_sprites.col[i * 4 + 1]        = col[1];
+        s_sprites.col[i * 4 + 2]        = col[2];
+        s_sprites.col[i * 4 + 3]        = col[3];
+        s_sprites.scale[i * 2 + 0]      = scale[0];
+        s_sprites.scale[i * 2 + 1]      = scale[1];
+        s_sprites.scale_u[i * 1 + 0]    = scale_u;
+        s_sprites.state[i * 1 + 0]      = state;
+        s_sprites.anim_level[i * 1 + 0] = anim_level;
+        s_sprites.anim_t[i * 1 + 0]     = anim_t;
+      }
     }
 
     // Draw
@@ -897,20 +949,17 @@ void start(void) {
     glBindBuffer(GL_ARRAY_BUFFER, tile_level_bo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(s_sprites.anim_level), s_sprites.anim_level);
 
+    glBindBuffer(GL_ARRAY_BUFFER, scale_u_bo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(s_sprites.scale_u),
+        s_sprites.scale_u);
+
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, SPRITES_COUNT);
 
     window_flush(&w);
-
-    // Step through event loop once, updating input events
-    event_loop_step(&loop);
-
-    // ESC to exit
-    if (loop.keycodes.e[KC_ESC]) {
-      break;
-    }
   }
   print_avg_dt_fps(loop_s / loop_count);
 
+shutdown:
   // Shutdown
   glDeleteShader(sprite_prog);
 
@@ -919,6 +968,7 @@ void start(void) {
   glDeleteBuffers(1, &col_bo);
   glDeleteBuffers(1, &scale_bo);
   glDeleteBuffers(1, &tile_level_bo);
+  glDeleteBuffers(1, &scale_u_bo);
   glDeleteVertexArrays(1, &vao);
 
   window_shutdown(&w);
