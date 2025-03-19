@@ -47,7 +47,7 @@ enum sprite_flag : u16 {
   SPRITE_STATE_FADE_OUT   = 1 << 5,
   SPRITE_STATE_LOVER      = 1 << 6, // 0 - STRANGER, 1 - LOVER
   SPRITE_STATE_PLAYER     = 1 << 7, // 0 - STRANGER, 1 - LOVER
-  SPRITE_STATE_HIDDEN     = 1 << 8,
+  SPRITE_STATE_DISABLED   = 1 << 8,
 };
 
 struct sprite_state {
@@ -679,6 +679,7 @@ void start(void) {
       if (loop.keycodes.e[KC_ESC]) {
         goto shutdown;
       }
+
       // Player controls
       f32 PLAYER_CONTROL_VEL = 2.0f * SIM_TICK;
       f32 vel[2];
@@ -724,6 +725,13 @@ void start(void) {
         vel0[0]   = s_sprites.vel[i * 2 + 0];
         vel0[1]   = s_sprites.vel[i * 2 + 1];
 
+        if (!is_bit_set(state0.flags, SPRITE_STATE_COLLIDE)) {
+          continue;
+        }
+        if (is_bit_set(state0.flags, SPRITE_STATE_DISABLED)) {
+          continue;
+        }
+
         for (i32 j = i + 1; j < SPRITES_COUNT; ++j) {
           struct sprite_state state1;
           f32 pos1[2];
@@ -740,10 +748,10 @@ void start(void) {
           vel1[0]   = s_sprites.vel[j * 2 + 0];
           vel1[1]   = s_sprites.vel[j * 2 + 1];
 
-          if (!is_bit_set(state0.flags, SPRITE_STATE_COLLIDE)) {
+          if (!is_bit_set(state1.flags, SPRITE_STATE_COLLIDE)) {
             continue;
           }
-          if (!is_bit_set(state1.flags, SPRITE_STATE_COLLIDE)) {
+          if (is_bit_set(state1.flags, SPRITE_STATE_DISABLED)) {
             continue;
           }
 
@@ -830,6 +838,10 @@ void start(void) {
 
         anim_idx        = s_sprites.anim_idx[i * 1 + 0];
         anim_t          = s_sprites.anim_t[i * 1 + 0];
+
+        if (is_bit_set(state.flags, SPRITE_STATE_DISABLED)) {
+          continue;
+        }
 
         if (is_bit_set(state.flags, SPRITE_STATE_MOVE)) {
           pos[0]        += vel[0] * SIM_TICK;
