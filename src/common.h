@@ -719,7 +719,8 @@ static CGEventRef event_handler(CGEventTapProxy proxy, CGEventType type,
       WARN_IF(1, "Unhandled event type");
       break;
   }
-  return event;
+  // By not returning `event` we swallow it
+  return 0;
 }
 
 // Must be paired with event_loop_shutdown()
@@ -731,7 +732,7 @@ static void event_loop_init(struct event_loop *loop) {
 
   event_mask  = (1 << kCGEventKeyDown) | (1 << kCGEventKeyUp);
   event_tap   = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
-      kCGEventTapOptionListenOnly, event_mask, event_handler, loop);
+      kCGEventTapOptionDefault, event_mask, event_handler, loop);
   EXPECT(event_tap, "CGEventTapCreate() failed");
 
   source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, event_tap, 0);

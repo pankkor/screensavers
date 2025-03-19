@@ -5,7 +5,7 @@
 - No libc (-nostdlib).
 - Not optimizated.
 - Taps to keyboard events. Requests Input Monitoring perimssion.
-- To exit press ESC or Ctrl-C.
+- To exit press ESC.
 
 ### Supported Platforms
 - macOS AArch64 (clang)

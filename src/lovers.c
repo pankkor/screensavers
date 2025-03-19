@@ -446,7 +446,7 @@ void start(void) {
   print_cstr(STDOUT, "OpenGL version: \n");
   print_cstr(STDOUT, (const char *)version_cstr);
   print_cstr(STDOUT, "\n\n");
-  print_cstr(STDOUT, "<Press ESC or Ctrl-C to exit>\n");
+  print_cstr(STDOUT, "<Press ESC to exit>\n");
 
   GLuint sprite_prog = create_gl_shader_program(
     s_sprite_vert_src,
