@@ -10,13 +10,9 @@
 #include "common.h"
 
 // TODO:
-// - Generate sprite vertices based on gl_VertexID
 // - Change direction of strangers from time to time
 // - Z sort
 //
-// DONE:
-// + Change sprites (Tex2dArray)
-// + Change animation frames
 
 // --------------------------------------
 // Config
@@ -24,9 +20,8 @@
 // Fixed simulation tick time, s.
 #define SIM_TICK                  (1.0f / 120.0f)
 #define SPRITE_VEL_MAX            0.5f
-#define SPRITE_SIZE               0.2f
-#define SPRITE_SIZE_05            (SPRITE_SIZE * 0.6f)
-#define SPRITE_COLLISION_SIZE_05  (SPRITE_SIZE_05 * 0.4f)
+#define SPRITE_SIZE               0.25f
+#define SPRITE_COLLISION_SIZE_05  (SPRITE_SIZE * 0.5f * 0.4f)
 #define SPRITE_SCALE_VEL          0.1f
 
 enum {
@@ -135,24 +130,33 @@ struct sprites s_sprites;
 // --------------------------------------
 static const char * const s_sprite_vert_src = "                                \
 #version 410 core                                                              \
-layout(location = 0) in vec4  v_vertuv;                                        \
 layout(location = 1) in vec3  v_pos;                                           \
 layout(location = 2) in vec4  v_col;                                           \
 layout(location = 3) in vec2  v_scale;                                         \
 layout(location = 4) in ivec2 v_tile_level;                                    \
 layout(location = 5) in float v_scale_u;                                       \
                                                                                \
+uniform vec2 size;                                                             \
 uniform float iaspect;                                                         \
                                                                                \
 out vec4 f_col;                                                                \
 out vec3 f_uvw;                                                                \
                                                                                \
+const vec2 verts[4] = vec2[](                                                  \
+  vec2(-0.5, -0.5), vec2(0.5, -0.5), vec2(-0.5, 0.5), vec2(0.5, 0.5)           \
+);                                                                             \
+const vec2 uvs[4] = vec2[](                                                    \
+  vec2(0.0, 1.0), vec2(1.0, 1.0), vec2(0.0, 0.0), vec2(1.0, 0.0)               \
+);                                                                             \
+                                                                               \
 void main(void) {                                                              \
-  vec3 pos = vec3(v_vertuv.xy * v_scale.xy, 0.0) + v_pos;                      \
+  vec2 vert = verts[gl_VertexID] * size;                                       \
+  vec2 uv = uvs[gl_VertexID];                                                  \
+  vec3 pos = vec3(vert.xy * v_scale.xy, 0.0) + v_pos;                          \
   pos.x *= iaspect;                                                            \
   gl_Position = vec4(pos, 1.0);                                                \
   f_col = v_col;                                                               \
-  f_uvw = vec3(v_vertuv.z * v_scale_u, v_vertuv.w, v_tile_level);              \
+  f_uvw = vec3(uv.s * v_scale_u, uv.t, v_tile_level);                          \
 }                                                                              \
 ";
 
@@ -503,37 +507,22 @@ void start(void) {
   f32 iaspect = 1.0f / aspect;
 
   GLuint vao;
-  GLuint vert_bo;
   GLuint pos_bo;
   GLuint col_bo;
   GLuint scale_bo;
   GLuint tile_level_bo;
   GLuint scale_u_bo;
   glGenVertexArrays(1, &vao);
-  glGenBuffers(1, &vert_bo);
   glGenBuffers(1, &pos_bo);
   glGenBuffers(1, &col_bo);
   glGenBuffers(1, &scale_bo);
   glGenBuffers(1, &tile_level_bo);
   glGenBuffers(1, &scale_u_bo);
 
-  GLfloat sprite_verts[] = {
-    -SPRITE_SIZE_05, -SPRITE_SIZE_05, 0.0f, 1.0f,
-     SPRITE_SIZE_05, -SPRITE_SIZE_05, 1.0f, 1.0f,
-    -SPRITE_SIZE_05,  SPRITE_SIZE_05, 0.0f, 0.0f,
-     SPRITE_SIZE_05,  SPRITE_SIZE_05, 1.0f, 0.0f,
-  };
-
   glUseProgram(sprite_prog);
   glBindVertexArray(vao);
 
   // Vertices
-  glBindBuffer(GL_ARRAY_BUFFER, vert_bo);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(sprite_verts), sprite_verts,
-      GL_STATIC_DRAW);
-  glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
-  glEnableVertexAttribArray(0);
-
   GLuint tile_tx;
   glGenTextures(1, &tile_tx);
   glBindTexture(GL_TEXTURE_2D_ARRAY, tile_tx);
@@ -546,6 +535,7 @@ void start(void) {
   glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
   glUniform1i(glGetUniformLocation(sprite_prog, "tile_tx"), 0);
+  glUniform2f(glGetUniformLocation(sprite_prog, "size"), SPRITE_SIZE, SPRITE_SIZE);
   glUniform1f(glGetUniformLocation(sprite_prog, "iaspect"), iaspect);
 
   glBindBuffer(GL_ARRAY_BUFFER, pos_bo);
@@ -1071,7 +1061,6 @@ shutdown:
   // Shutdown
   glDeleteShader(sprite_prog);
 
-  glDeleteBuffers(1, &vert_bo);
   glDeleteBuffers(1, &pos_bo);
   glDeleteBuffers(1, &col_bo);
   glDeleteBuffers(1, &scale_bo);
