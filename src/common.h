@@ -718,7 +718,7 @@ int s_map_flags[] = {
   kCGEventFlagMaskAlphaShift,
 };
 static_assert(ARRAY_COUNT(s_map_keycodes) == ARRAY_COUNT(s_map_flags),
-    "s_map_keycodes size shall match s_map_flags size");
+    "size mismatch");
 
 static CGEventRef event_handler(CGEventTapProxy proxy, CGEventType type,
     CGEventRef event, void *userdata)
