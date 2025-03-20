@@ -20,7 +20,7 @@
 // Fixed simulation tick time, s.
 #define SIM_TICK                  (1.0f / 120.0f)
 #define SPRITE_VEL_MAX            0.5f
-#define SPRITE_SIZE               0.25f
+#define SPRITE_SIZE               0.24f
 #define SPRITE_COLLISION_SIZE_05  (SPRITE_SIZE * 0.5f * 0.4f)
 #define SPRITE_SCALE_VEL          0.1f
 
