@@ -10,7 +10,6 @@
 #include "common.h"
 
 // TODO:
-// - Change direction of strangers from time to time
 // - Z sort
 //
 
@@ -18,11 +17,15 @@
 // Config
 // --------------------------------------
 // Fixed simulation tick time, s.
-#define SIM_TICK                  (1.0f / 120.0f)
-#define SPRITE_VEL_MAX            0.5f
-#define SPRITE_SIZE               0.24f
-#define SPRITE_COLLISION_SIZE_05  (SPRITE_SIZE * 0.5f * 0.4f)
-#define SPRITE_SCALE_VEL          0.1f
+#define SIM_TICK                    (1.0f / 120.0f)
+#define SPRITE_VEL_MAX              0.5f
+#define SPRITE_SIZE                 0.24f
+#define SPRITE_COLLISION_SIZE_05    (SPRITE_SIZE * 0.5f * 0.4f)
+#define SPRITE_SCALE_VEL            0.1f
+
+#define SPRITE_CHANGE_DIR_TIME_MIN  2.0f
+#define SPRITE_CHANGE_DIR_TIME_MAX  10.0f
+#define SPRITE_IDLE_TIME            -2.0f
 
 enum {
   SPRITES_COUNT = 128,
@@ -116,6 +119,7 @@ struct sprites {
   ALIGNED(16) f32                 scale     [2 * SPRITES_COUNT]; // update, draw
   ALIGNED(16) f32                 scale_u   [1 * SPRITES_COUNT]; // update, draw
   ALIGNED(16) i32                 palette   [1 * SPRITES_COUNT]; // update
+  ALIGNED(16) f32                 dir_time  [1 * SPRITES_COUNT]; // update
   ALIGNED(16) struct sprite_state state     [1 * SPRITES_COUNT]; // update
   // Animations
   ALIGNED(16) i32                 anim_level[1 * SPRITES_COUNT]; // update, draw
@@ -583,6 +587,7 @@ void start(void) {
 
   struct xorshift64_state vel_st  = {137382305742834};
   struct xorshift64_state pos_st  = {815936748814573};
+  struct xorshift64_state dir_st  = {323687463988431};
 
   // Spawn
   for (i32 idx = 0; idx < LOVERS_COUNT; ++idx) {
@@ -591,6 +596,7 @@ void start(void) {
     s_sprites.anim_t[i * 1 + 0]         = (f32)i / SPRITES_COUNT;
     s_sprites.scale[i * 2 + 0]          = 1.0f;
     s_sprites.scale[i * 2 + 1]          = 1.0f;
+    s_sprites.dir_time[i * 1 + 0]       = SPRITE_CHANGE_DIR_TIME_MAX;
     s_sprites.state[i * 1 + 0].flags = SPRITE_STATE_RESPAWN |
       SPRITE_STATE_COLLIDE | SPRITE_STATE_MOVE | SPRITE_STATE_LOVER;
   }
@@ -603,10 +609,11 @@ void start(void) {
     f32 kpos1   = xorshift64(&pos_st) / (f32)U64_MAX;
     i32 palette =
       LOVER_PALETTE_COUNT + idx % (PALETTE_COUNT - LOVER_PALETTE_COUNT);
+    f32 kdir   = xorshift64(&dir_st) / (f32)U64_MAX;
 
-    s_sprites.pos[i * 3 + 0]          = lerpf32(kpos0, bounds[0], bounds[1]);
-    s_sprites.pos[i * 3 + 1]          = lerpf32(kpos1, bounds[2], bounds[3]);
-    s_sprites.pos[i * 3 + 2]          = (f32)i / SPRITES_COUNT;
+    s_sprites.pos[i * 3 + 0]            = lerpf32(kpos0, bounds[0], bounds[1]);
+    s_sprites.pos[i * 3 + 1]            = lerpf32(kpos1, bounds[2], bounds[3]);
+    s_sprites.pos[i * 3 + 2]            = (f32)i / SPRITES_COUNT;
 
     s_sprites.vel[i * 2 + 0]  = lerpf32(kvel0, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
     s_sprites.vel[i * 2 + 1]  = lerpf32(kvel1, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
@@ -621,6 +628,9 @@ void start(void) {
 
     s_sprites.scale[i * 2 + 0]          = 1.0f;
     s_sprites.scale[i * 2 + 1]          = 1.0f;
+
+    s_sprites.dir_time[i * 1 + 0]       =
+      lerpf32(kdir, -SPRITE_IDLE_TIME, SPRITE_CHANGE_DIR_TIME_MAX);
 
     s_sprites.state[i * 1 + 0].palette  = palette;
     s_sprites.state[i * 1 + 0].flags = SPRITE_STATE_COLLIDE | SPRITE_STATE_MOVE;
@@ -892,6 +902,7 @@ void start(void) {
         f32 scale[2];
         f32 scale_u;
         i32 dmask[2];
+        f32 dir_time;
         // Animaiton
         i32 anim_idx;
         f32 anim_t;
@@ -911,12 +922,33 @@ void start(void) {
         scale[0]        = s_sprites.scale[i * 2 + 0];
         scale[1]        = s_sprites.scale[i * 2 + 1];
         scale_u         = s_sprites.scale_u[i * 1 + 0];
+        dir_time        = s_sprites.dir_time[i * 1 + 0];
 
         anim_idx        = s_sprites.anim_idx[i * 1 + 0];
         anim_t          = s_sprites.anim_t[i * 1 + 0];
 
         if (is_bit_set(state.flags, SPRITE_STATE_DISABLED)) {
           continue;
+        }
+
+        // Idle and Change direction of movement from time to time
+        dir_time      -= SIM_TICK;
+        if (!is_bit_set(state.flags, SPRITE_STATE_PLAYER)) {
+          if (dir_time < 0.0f) {
+            // Idle
+            state.flags &= ~SPRITE_STATE_MOVE;
+          }
+          if (dir_time < SPRITE_IDLE_TIME) {
+            // Change direction
+            f32 kdir    = xorshift64(&dir_st) / (f32)U64_MAX;
+            f32 kvel0   = xorshift64(&vel_st) / (f32)U64_MAX;
+            f32 kvel1   = xorshift64(&vel_st) / (f32)U64_MAX;
+            vel[0]      = lerpf32(kvel0, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
+            vel[1]      = lerpf32(kvel1, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
+            dir_time    = lerpf32(kdir, SPRITE_CHANGE_DIR_TIME_MIN,
+                SPRITE_CHANGE_DIR_TIME_MAX);
+            state.flags |= SPRITE_STATE_MOVE;
+          }
         }
 
         if (is_bit_set(state.flags, SPRITE_STATE_MOVE)) {
@@ -1021,6 +1053,7 @@ void start(void) {
         s_sprites.scale[i * 2 + 0]      = scale[0];
         s_sprites.scale[i * 2 + 1]      = scale[1];
         s_sprites.scale_u[i * 1 + 0]    = scale_u;
+        s_sprites.dir_time[i * 1 + 0]   = dir_time;
         s_sprites.state[i * 1 + 0]      = state;
         s_sprites.anim_level[i * 1 + 0] = anim_level;
         s_sprites.anim_t[i * 1 + 0]     = anim_t;
