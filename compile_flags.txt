@@ -8,7 +8,7 @@
 -O1
 -mcpu=native
 -g
--fno-builtin
+-ffreestanding
 -nostdlib
 -e _start
 -framework OpenGL
