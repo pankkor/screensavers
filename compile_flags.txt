@@ -11,6 +11,8 @@
 -ffreestanding
 -nostdlib
 -e _start
+-fno-unwind-tables
+-fno-asynchronous-unwind-tables
 -framework OpenGL
 -framework CoreGraphics
 -framework ApplicationServices
