@@ -10,7 +10,6 @@
 #include "common.h"
 
 // TODO:
-// - animation fps broken
 // - Z sort
 
 // --------------------------------------
@@ -27,13 +26,18 @@
 #define SPRITE_CHANGE_DIR_TIME_MAX  10.0f
 #define SPRITE_IDLE_TIME            -2.0f
 
+// TODO: repalce _COUNT with from-to [L;R] indicies.
+// Those entities are parts of the same array. from-to indicies are natural.
 enum {
   SPRITES_COUNT = 128,
   LOVERS_COUNT = 2,
   BUSHES_COUNT = 15,
   STRANGERS_COUNT = SPRITES_COUNT - LOVERS_COUNT - BUSHES_COUNT,
 };
-enum {PLAYER_IDX = 0};   // player is lover #0
+enum {
+  PLAYER_IDX = 0, // player is lover #0
+  PLAYER_COUNT = 1, // player is lover #0
+};
 
 static_assert(SPRITES_COUNT >= LOVERS_COUNT, "Index out of bound");
 static_assert(PLAYER_IDX < SPRITES_COUNT, "Index out of bounds");
@@ -52,16 +56,15 @@ enum {
 enum sprite_flag : u16 {
   // Flags
   SPRITE_STATE_MOVE           = 1 << 1,
-  SPRITE_STATE_SCALE          = 1 << 2,
+  SPRITE_STATE_SCALE_UP       = 1 << 2,
   SPRITE_STATE_COLLIDE        = 1 << 3,
   SPRITE_STATE_FADE_IN        = 1 << 4,
   SPRITE_STATE_FADE_OUT       = 1 << 5,
   SPRITE_STATE_LOVER          = 1 << 6, // 0 - STRANGER, 1 - LOVER
   SPRITE_STATE_PLAYER         = 1 << 7,
   SPRITE_STATE_DISABLED       = 1 << 8, // Not used atm
-  SPRITE_STATE_RESPAWN        = 1 << 9,
-  SPRITE_STATE_CHANGE_DIR     = 1 << 10,
-  SPRITE_STATE_ANIM_VEL_SCALE = 1 << 11,
+  SPRITE_STATE_CHANGE_DIR     = 1 << 9,
+  SPRITE_STATE_ANIM_VEL_SCALE = 1 << 10,
 };
 
 struct sprite_state {
@@ -69,9 +72,12 @@ struct sprite_state {
   i8               palette;
 };
 
-enum game_state {
-  GAME_STATE_FADE_OUT         = 1 << 1,
-  GAME_STATE_SPRITES_FADE_IN  = 1 << 2,
+enum level_state {
+  LEVEL_STATE_PLAYING = 0,
+  LEVEL_STATE_DESPAWN,
+  LEVEL_STATE_DESPAWNING,
+  LEVEL_STATE_RANDOMIZE,
+  LEVEL_STATE_SPAWN,
 };
 
 #define RGBA_F32x4(hex) {                                                      \
@@ -706,7 +712,8 @@ void start(void) {
   GLuint tile_tx;
   glGenTextures(1, &tile_tx);
   glBindTexture(GL_TEXTURE_2D_ARRAY, tile_tx);
-  glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, TILE_W, TILE_H, TILE_LEVEL_COUNT);
+  glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, TILE_W, TILE_H,
+      TILE_LEVEL_COUNT);
   glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, TILE_W, TILE_H,
       TILE_LEVEL_COUNT, GL_RGBA, GL_UNSIGNED_BYTE, s_tilemap_data);
   glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -715,7 +722,8 @@ void start(void) {
   glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
   glUniform1i(glGetUniformLocation(sprite_prog, "tile_tx"), 0);
-  glUniform2f(glGetUniformLocation(sprite_prog, "size"), SPRITE_SIZE, SPRITE_SIZE);
+  glUniform2f(glGetUniformLocation(sprite_prog, "size"), SPRITE_SIZE,
+      SPRITE_SIZE);
   glUniform1f(glGetUniformLocation(sprite_prog, "iaspect"), iaspect);
 
   glBindBuffer(GL_ARRAY_BUFFER, pos_bo);
@@ -740,8 +748,8 @@ void start(void) {
   glEnableVertexAttribArray(3);
 
   glBindBuffer(GL_ARRAY_BUFFER, tile_level_bo);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(s_sprites.anim_level), s_sprites.anim_level,
-      GL_STATIC_DRAW);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(s_sprites.anim_level),
+      s_sprites.anim_level, GL_STATIC_DRAW);
   glVertexAttribPointer(4, 1, GL_INT, GL_FALSE, 0, 0);
   glVertexAttribDivisor(4, 1);
   glEnableVertexAttribArray(4);
@@ -762,7 +770,7 @@ void start(void) {
   };
 
   struct xorshift64_state vel_st  = {137382305742834};
-  struct xorshift64_state pos_st  = {315936748814573};
+  struct xorshift64_state pos_st  = {235936748814573};
   struct xorshift64_state dir_st  = {323687463988431};
 
   // Spawn
@@ -774,33 +782,14 @@ void start(void) {
     s_sprites.scale[i * 2 + 1]          = 1.0f;
     s_sprites.scale_u[i * 1 + 1]        = 1.0f;
     s_sprites.dir_time[i * 1 + 0]       = SPRITE_CHANGE_DIR_TIME_MAX;
-    s_sprites.state[i * 1 + 0].flags = SPRITE_STATE_RESPAWN |
-      SPRITE_STATE_COLLIDE | SPRITE_STATE_MOVE | SPRITE_STATE_LOVER |
-      SPRITE_STATE_CHANGE_DIR | SPRITE_STATE_ANIM_VEL_SCALE;
+    s_sprites.state[i * 1 + 0].flags    = SPRITE_STATE_LOVER |
+      SPRITE_STATE_COLLIDE | SPRITE_STATE_MOVE | SPRITE_STATE_CHANGE_DIR |
+      SPRITE_STATE_ANIM_VEL_SCALE;
   }
 
   for (i32 idx = 0; idx < STRANGERS_COUNT; ++idx) {
-    i32 i       = idx + LOVERS_COUNT;
-    f32 kvel0   = xorshift64(&vel_st) / (f32)U64_MAX;
-    f32 kvel1   = xorshift64(&vel_st) / (f32)U64_MAX;
-    f32 kpos0   = xorshift64(&pos_st) / (f32)U64_MAX;
-    f32 kpos1   = xorshift64(&pos_st) / (f32)U64_MAX;
-    i32 palette =
-      LOVER_PALETTE_COUNT + idx % (PALETTE_COUNT - LOVER_PALETTE_COUNT);
-    f32 kdir   = xorshift64(&dir_st) / (f32)U64_MAX;
-
-    s_sprites.pos[i * 3 + 0]            = lerpf32(kpos0, bounds[0], bounds[1]);
-    s_sprites.pos[i * 3 + 1]            = lerpf32(kpos1, bounds[2], bounds[3]);
-    s_sprites.pos[i * 3 + 2]            = (f32)i / SPRITES_COUNT;
-
-    s_sprites.vel[i * 2 + 0]  = lerpf32(kvel0, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
-    s_sprites.vel[i * 2 + 1]  = lerpf32(kvel1, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
-
-    s_sprites.col[i * 4 + 0]            = s_col_palettes[palette][0];
-    s_sprites.col[i * 4 + 1]            = s_col_palettes[palette][1];
-    s_sprites.col[i * 4 + 2]            = s_col_palettes[palette][2];
-    s_sprites.col[i * 4 + 3]            = s_col_palettes[palette][3];
-
+    i32 i                               = idx + LOVERS_COUNT;
+    f32 kdir                            = xorshift64(&dir_st) / (f32)U64_MAX;
     s_sprites.anim_idx[i * 1 + 0]       = ANIM_STRANGER_WALK;
     s_sprites.anim_t[i * 1 + 0]         = (f32)i / SPRITES_COUNT;
 
@@ -812,16 +801,14 @@ void start(void) {
     s_sprites.dir_time[i * 1 + 0]       =
       lerpf32(kdir, -SPRITE_IDLE_TIME, SPRITE_CHANGE_DIR_TIME_MAX);
 
-    s_sprites.state[i * 1 + 0].palette  = palette;
     s_sprites.state[i * 1 + 0].flags =
-      SPRITE_STATE_COLLIDE | SPRITE_STATE_MOVE | SPRITE_STATE_CHANGE_DIR |
-      SPRITE_STATE_ANIM_VEL_SCALE;
+      SPRITE_STATE_CHANGE_DIR | SPRITE_STATE_ANIM_VEL_SCALE;
   }
 
   for (i32 idx = 0; idx < BUSHES_COUNT; ++idx) {
-    i32 i       = idx + LOVERS_COUNT + STRANGERS_COUNT;
-    f32 kpos0   = xorshift64(&pos_st) / (f32)U64_MAX;
-    f32 kpos1   = xorshift64(&pos_st) / (f32)U64_MAX;
+    i32 i                               = idx + LOVERS_COUNT + STRANGERS_COUNT;
+    f32 kpos0                           = xorshift64(&pos_st) / (f32)U64_MAX;
+    f32 kpos1                           = xorshift64(&pos_st) / (f32)U64_MAX;
     s_sprites.pos[i * 3 + 0]            = lerpf32(kpos0, bounds[0], bounds[1]);
     s_sprites.pos[i * 3 + 1]            = lerpf32(kpos1, bounds[2], bounds[3]);
     s_sprites.pos[i * 3 + 2]            = (f32)i / SPRITES_COUNT;
@@ -838,26 +825,30 @@ void start(void) {
     s_sprites.col[i * 4 + 3]            = s_col_palettes[0][3];
   }
 
-  EXPECT(SPRITES_COUNT >= LOVERS_COUNT, "There has to be at least one lover.");
-  EXPECT(SPRITES_COUNT > 0, "There has to be at least 1 sprite");
+  // Level
+  {
+    // Lovers start at borders facing each other
+    EXPECT(SPRITES_COUNT >= LOVERS_COUNT, "There has to be at least one lover.");
+    EXPECT(SPRITES_COUNT > 0, "There has to be at least 1 sprite");
 
-  // Lovers start at borders facing each other
-  s_sprites.pos[1 * 3 + 0] = bounds[1] - 0.25;
-  s_sprites.pos[1 * 3 + 1] = 0.0;
-  s_sprites.vel[1 * 2 + 0] = -SPRITE_VEL_MAX;
-  s_sprites.vel[1 * 2 + 1] = 0.0;
-  s_sprites.pos[PLAYER_IDX * 3 + 0] = -0.3;
-  s_sprites.pos[PLAYER_IDX * 3 + 1] = 0.0f;
-  s_sprites.vel[PLAYER_IDX * 2 + 0] = 0.0f;
-  s_sprites.vel[PLAYER_IDX * 2 + 1] = 0.0f;
-  s_sprites.state[PLAYER_IDX].flags |= SPRITE_STATE_PLAYER;
-  s_sprites.state[PLAYER_IDX].flags &= ~SPRITE_STATE_CHANGE_DIR;
+    i32 first_lover_idx = PLAYER_IDX + 1;
+    s_sprites.pos[first_lover_idx * 3 + 0] = bounds[1] - 0.25;
+    s_sprites.pos[first_lover_idx * 3 + 1] = 0.0;
+    s_sprites.vel[first_lover_idx * 2 + 0] = -SPRITE_VEL_MAX;
+    s_sprites.vel[first_lover_idx * 2 + 1] = 0.0;
+    s_sprites.pos[PLAYER_IDX * 3 + 0] = -0.3;
+    s_sprites.pos[PLAYER_IDX * 3 + 1] = 0.0f;
+    s_sprites.vel[PLAYER_IDX * 2 + 0] = 0.0f;
+    s_sprites.vel[PLAYER_IDX * 2 + 1] = 0.0f;
+    s_sprites.state[PLAYER_IDX].flags |= SPRITE_STATE_PLAYER;
+    s_sprites.state[PLAYER_IDX].flags &= ~SPRITE_STATE_CHANGE_DIR;
+  }
 
-  // Level progression
-  i32 game_level = -1;
-  i32 game_next_level = GAME_LEVEL_FIRST;
+  enum level_state level_state  = LEVEL_STATE_SPAWN;
+  i32 game_level = GAME_LEVEL_FIRST;
+  i32 game_next_level = game_level;
 
-  f32 fade_out_a = 0.0f;
+  f32 fade_in_a = 0.0f;
 
   // Game loop
   f32 cpu_timer_freq  = read_cpu_timer_freq();
@@ -869,6 +860,8 @@ void start(void) {
   f32 print_dt_tsc    = tsc + 5.0f * cpu_timer_freq;
 
   f32 sim_dt          = 0.0f;
+
+  f32 anim_level_state_transition_t  = 0.0f;
 
   while (1) {
     // dt bookkeeping
@@ -908,10 +901,15 @@ void start(void) {
         goto shutdown;
       }
 
-      // Check next level
+      anim_level_state_transition_t += SIM_TICK;
+
+      // Transition to next level
       if (game_level != game_next_level) {
         game_level = game_next_level;
+        level_state = LEVEL_STATE_DESPAWN;
+      }
 
+      {
         b32 is_nightmare = game_level >= GAME_LEVEL_NIGHTMARE_FIRST;
         i32 scale = is_nightmare
           ? GAME_LEVEL_STRANGERS_NIGHTMARE_SCALE
@@ -919,51 +917,85 @@ void start(void) {
 
         i32 enabled_strangers = MIN(game_level * scale, STRANGERS_COUNT);
 
-        i32 i = 0;
-        for (; i < LOVERS_COUNT; ++i) {
-          i32 palette = is_nightmare
-            ? NIGHTMARE_PALETTE
-            : i % LOVER_PALETTE_COUNT;
+        switch (level_state) {
+          case LEVEL_STATE_PLAYING: break;
 
-          s_sprites.state[i * 1 + 0].palette  = palette;
-          s_sprites.col[i * 4 + 0]            = s_col_palettes[palette][0];
-          s_sprites.col[i * 4 + 1]            = s_col_palettes[palette][1];
-          s_sprites.col[i * 4 + 2]            = s_col_palettes[palette][2];
-          s_sprites.col[i * 4 + 3]            = s_col_palettes[palette][3];
-        }
+          case LEVEL_STATE_DESPAWN:
+            for (i32 i = 0; i < LOVERS_COUNT + STRANGERS_COUNT; ++i) {
+              s_sprites.state[i * 1 + 0].flags |=   SPRITE_STATE_SCALE_UP;
+              s_sprites.state[i * 1 + 0].flags |=   SPRITE_STATE_FADE_OUT;
+              s_sprites.state[i * 1 + 0].flags &=   ~SPRITE_STATE_FADE_IN;
+              s_sprites.state[i * 1 + 0].flags &=   ~SPRITE_STATE_COLLIDE;
+              s_sprites.state[i * 1 + 0].flags &=   ~SPRITE_STATE_MOVE;
+            }
 
-        // Respawn happens after fade out. Fade strangers out.
-        // Respawn strangers according to level number
-        for (; i < LOVERS_COUNT + enabled_strangers; ++i) {
-          i32 palette = is_nightmare
-            ? NIGHTMARE_PALETTE
-            : LOVER_PALETTE_COUNT + i % (PALETTE_COUNT - LOVER_PALETTE_COUNT);
+            anim_level_state_transition_t = 0.0f;
+            ++level_state;
+          break;
 
-          s_sprites.scale[i * 2 + 0]          = 1.0f;
-          s_sprites.scale[i * 2 + 1]          = 1.0f;
+          case LEVEL_STATE_DESPAWNING:
+            if (anim_level_state_transition_t > 0.5f) {
+              anim_level_state_transition_t = 0.0f;
+              ++level_state;
+            }
+          break;
 
-          s_sprites.state[i * 1 + 0].flags    |= SPRITE_STATE_RESPAWN;
-          s_sprites.state[i * 1 + 0].flags    |= SPRITE_STATE_FADE_IN;
-          s_sprites.state[i * 1 + 0].flags    |= SPRITE_STATE_COLLIDE;
-          s_sprites.state[i * 1 + 0].flags    |= SPRITE_STATE_MOVE;
-          s_sprites.state[i * 1 + 0].flags    &= ~SPRITE_STATE_SCALE;
-          s_sprites.state[i * 1 + 0].flags    &= ~SPRITE_STATE_FADE_OUT;
-          s_sprites.state[i * 1 + 0].flags    &= ~SPRITE_STATE_DISABLED;
+          case LEVEL_STATE_RANDOMIZE: {
+            // Reset plaers speed
+            i32 i = 0;
+            for (; i < PLAYER_COUNT; ++i) {
+              f32 kpos0   = xorshift64(&pos_st) / (f32)U64_MAX;
+              f32 kpos1   = xorshift64(&pos_st) / (f32)U64_MAX;
+              s_sprites.pos[i * 3 + 0]  = lerpf32(kpos0, bounds[0], bounds[1]);
+              s_sprites.pos[i * 3 + 1]  = lerpf32(kpos1, bounds[2], bounds[3]);
+              s_sprites.vel[i * 2 + 0]  = 0.0f;
+              s_sprites.vel[i * 2 + 1]  = 0.0f;
+            }
 
-          s_sprites.state[i * 1 + 0].palette  = palette;
-          s_sprites.col[i * 4 + 0]            = s_col_palettes[palette][0];
-          s_sprites.col[i * 4 + 1]            = s_col_palettes[palette][1];
-          s_sprites.col[i * 4 + 2]            = s_col_palettes[palette][2];
-          s_sprites.col[i * 4 + 3]            = s_col_palettes[palette][3];
-        }
-        // Disable respawn for other strangers
-        for (; i < LOVERS_COUNT + STRANGERS_COUNT; ++i) {
-          s_sprites.state[i * 1 + 0].flags    &= ~SPRITE_STATE_RESPAWN;
-          s_sprites.state[i * 1 + 0].flags    &= ~SPRITE_STATE_FADE_IN;
-          s_sprites.state[i * 1 + 0].flags    &= ~SPRITE_STATE_COLLIDE;
-          s_sprites.state[i * 1 + 0].flags    &= ~SPRITE_STATE_MOVE;
-          s_sprites.state[i * 1 + 0].flags    |= SPRITE_STATE_SCALE;
-          s_sprites.state[i * 1 + 0].flags    |= SPRITE_STATE_FADE_OUT;
+            for (; i < LOVERS_COUNT + enabled_strangers; ++i) {
+              f32 kpos0   = xorshift64(&pos_st) / (f32)U64_MAX;
+              f32 kpos1   = xorshift64(&pos_st) / (f32)U64_MAX;
+              f32 kvel0   = xorshift64(&vel_st) / (f32)U64_MAX;
+              f32 kvel1   = xorshift64(&vel_st) / (f32)U64_MAX;
+              s_sprites.pos[i * 3 + 0]  = lerpf32(kpos0, bounds[0], bounds[1]);
+              s_sprites.pos[i * 3 + 1]  = lerpf32(kpos1, bounds[2], bounds[3]);
+              s_sprites.vel[i * 2 + 0]  =
+                lerpf32(kvel0, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
+              s_sprites.vel[i * 2 + 1]  =
+                lerpf32(kvel1, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
+            }
+
+            ++level_state;
+          } break;
+
+          case LEVEL_STATE_SPAWN: {
+            for (i32 i = 0; i < LOVERS_COUNT + enabled_strangers; ++i) {
+              b32 is_lover = is_bit_set(
+                  s_sprites.state[i * 1 + 0].flags, SPRITE_STATE_LOVER);
+
+              i32 palette = is_nightmare ? NIGHTMARE_PALETTE : is_lover
+                ? i % LOVER_PALETTE_COUNT
+                : LOVER_PALETTE_COUNT + i % (PALETTE_COUNT -
+                    LOVER_PALETTE_COUNT);
+
+              s_sprites.state[i * 1 + 0].flags    |= SPRITE_STATE_FADE_IN;
+              s_sprites.state[i * 1 + 0].flags    |= SPRITE_STATE_COLLIDE;
+              s_sprites.state[i * 1 + 0].flags    |= SPRITE_STATE_MOVE;
+              s_sprites.state[i * 1 + 0].flags    &= ~SPRITE_STATE_FADE_OUT;
+              s_sprites.state[i * 1 + 0].flags    &= ~SPRITE_STATE_SCALE_UP;
+              s_sprites.state[i * 1 + 0].flags    &= ~SPRITE_STATE_DISABLED;
+
+              s_sprites.state[i * 1 + 0].palette  = palette;
+              s_sprites.col[i * 4 + 0]            = s_col_palettes[palette][0];
+              s_sprites.col[i * 4 + 1]            = s_col_palettes[palette][1];
+              s_sprites.col[i * 4 + 2]            = s_col_palettes[palette][2];
+              s_sprites.col[i * 4 + 3]            = 0.0f;
+
+              s_sprites.scale[i * 2 + 0]          = 1.0f;
+              s_sprites.scale[i * 2 + 1]          = 1.0f;
+            }
+            level_state = LEVEL_STATE_PLAYING;
+          } break;
         }
       }
 
@@ -994,7 +1026,7 @@ void start(void) {
       s_sprites.vel[PLAYER_IDX * 2 + 0] = vel[0];
       s_sprites.vel[PLAYER_IDX * 2 + 1] = vel[1];
 
-      fade_out_a = clampf32(fade_out_a + 1.0f * SIM_TICK, 0.0f, 1.0f);
+      fade_in_a = clampf32(fade_in_a + 1.0f * SIM_TICK, 0.0f, 1.0f);
 
       // Circle collisions
       f32 radii         = SPRITE_COLLISION_SIZE_05 + SPRITE_COLLISION_SIZE_05;
@@ -1055,17 +1087,6 @@ void start(void) {
             if (match_lovers) {
               // Matching lovers
               if (close_to_match) {
-                s_sprites.state[i * 1 + 0].flags |=   SPRITE_STATE_SCALE;
-                s_sprites.state[j * 1 + 0].flags |=   SPRITE_STATE_SCALE;
-                s_sprites.state[i * 1 + 0].flags |=   SPRITE_STATE_FADE_OUT;
-                s_sprites.state[j * 1 + 0].flags |=   SPRITE_STATE_FADE_OUT;
-                s_sprites.state[i * 1 + 0].flags &=   ~SPRITE_STATE_FADE_IN;
-                s_sprites.state[j * 1 + 0].flags &=   ~SPRITE_STATE_FADE_IN;
-                s_sprites.state[i * 1 + 0].flags &=   ~SPRITE_STATE_COLLIDE;
-                s_sprites.state[j * 1 + 0].flags &=   ~SPRITE_STATE_COLLIDE;
-                s_sprites.state[i * 1 + 0].flags &=   ~SPRITE_STATE_MOVE;
-                s_sprites.state[j * 1 + 0].flags &=   ~SPRITE_STATE_MOVE;
-
                 game_next_level = game_level + GAME_LEVEL_INCREMENT;
               }
             } else {
@@ -1172,9 +1193,15 @@ void start(void) {
           dmask[1]      = pos[1] < bounds[2] || pos[1] > bounds[3];
         }
 
-        if (is_bit_set(state.flags, SPRITE_STATE_SCALE)) {
+        if (is_bit_set(state.flags, SPRITE_STATE_SCALE_UP)) {
           scale[0]      += SPRITE_SCALE_VEL;
           scale[1]      += SPRITE_SCALE_VEL;
+
+          if (scale[0] >= 3.0f) {
+            state.flags &= ~SPRITE_STATE_SCALE_UP;
+            scale[0]      = 1.0f;
+            scale[1]      = 1.0f;
+          }
         }
 
         if (is_bit_set(state.flags, SPRITE_STATE_FADE_IN)) {
@@ -1188,30 +1215,8 @@ void start(void) {
         if (is_bit_set(state.flags, SPRITE_STATE_FADE_OUT)) {
           col[3] *= 0.75f;
           if (col[3] < 0.001f) {
-            if (is_bit_set(state.flags, SPRITE_STATE_RESPAWN)) {
-              // Respawn
-              f32 kpos0   = xorshift64(&pos_st) / (f32)U64_MAX;
-              f32 kpos1   = xorshift64(&pos_st) / (f32)U64_MAX;
-              f32 kvel0   = xorshift64(&vel_st) / (f32)U64_MAX;
-              f32 kvel1   = xorshift64(&vel_st) / (f32)U64_MAX;
-              pos[0]      = lerpf32(kpos0, bounds[0], bounds[1]);
-              pos[1]      = lerpf32(kpos1, bounds[2], bounds[3]);
-              vel[0]      = lerpf32(kvel0, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
-              vel[1]      = lerpf32(kvel1, -SPRITE_VEL_MAX, SPRITE_VEL_MAX);
-              col[0]      = s_col_palettes[state.palette][0];
-              col[1]      = s_col_palettes[state.palette][1];
-              col[2]      = s_col_palettes[state.palette][2];
-              scale[0]    = 1.0f;
-              scale[1]    = 1.0f;
-              col[3]      = 0.0f;
-
-              state.flags &= ~SPRITE_STATE_FADE_OUT & ~SPRITE_STATE_SCALE;
-              state.flags |= SPRITE_STATE_COLLIDE | SPRITE_STATE_MOVE | SPRITE_STATE_FADE_IN;
-            } else {
-              scale[0]    = 0.0f;
-              scale[1]    = 0.0f;
-              state.flags |= SPRITE_STATE_DISABLED;
-            }
+              state.flags &= ~SPRITE_STATE_FADE_OUT;
+              col[3] = 0.0f;
           }
         }
         col[3] = clampf32(col[3], 0.0f, 1.0f);
@@ -1221,11 +1226,14 @@ void start(void) {
         if (is_bit_set(state.flags, SPRITE_STATE_ANIM_VEL_SCALE)) {
           // Animate walk animation even when simple repulsion is in action
           // (there is no velocity involved)
-          f32 dposdt[2]; // velocity calculated from position change in this frame
+
+          // Velocity calculated from position change in this frame
+          f32 dposdt[2];
           dposdt[0] = (pos[0] - pos_prev[0]) / SIM_TICK;
           dposdt[1] = (pos[1] - pos_prev[1]) / SIM_TICK;
 
-          f32 abs_dposdt = sqrtf32(dposdt[0] * dposdt[0] + dposdt[1] * dposdt[1]);
+          f32 abs_dposdt =
+            sqrtf32(dposdt[0] * dposdt[0] + dposdt[1] * dposdt[1]);
           // Only based on X velocity
           scale_u = dposdt[0] > -0.1f && dposdt[0] < 0.1f
             ? scale_u
@@ -1265,7 +1273,7 @@ void start(void) {
     }
 
     // Draw
-    glClearColor(0.34, 0.44f, 0.25, fade_out_a);
+    glClearColor(0.34, 0.44f, 0.25, fade_in_a);
     glClear(GL_COLOR_BUFFER_BIT);
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -1282,7 +1290,8 @@ void start(void) {
         s_sprites.scale);
 
     glBindBuffer(GL_ARRAY_BUFFER, tile_level_bo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(s_sprites.anim_level), s_sprites.anim_level);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(s_sprites.anim_level),
+        s_sprites.anim_level);
 
     glBindBuffer(GL_ARRAY_BUFFER, scale_u_bo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(s_sprites.scale_u),
