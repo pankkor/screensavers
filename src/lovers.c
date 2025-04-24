@@ -10,7 +10,7 @@
 #include "common.h"
 
 // TODO:
-// - Z sort
+// - Alpha blending when sprites fade out is bugged with depth-test
 
 // --------------------------------------
 // Config
@@ -163,13 +163,18 @@ const vec2 uvs[4] = vec2[](                                                    \
 );                                                                             \
                                                                                \
 void main(void) {                                                              \
-  vec2 vert = verts[gl_VertexID] * size;                                       \
-  vec2 uv = uvs[gl_VertexID];                                                  \
-  vec3 pos = vec3(vert.xy * v_scale.xy, 0.0) + v_pos;                          \
-  pos.x *= iaspect;                                                            \
-  gl_Position = vec4(pos, 1.0);                                                \
-  f_col = v_col;                                                               \
-  f_uvw = vec3(uv.s * v_scale_u, uv.t, v_tile_level);                          \
+  if (v_col.a < 0.001) {                                                       \
+    /* Discard disabled sprites */                                             \
+    gl_Position = vec4(0.0, 0.0, 0.0, 0.0);                                    \
+  } else {                                                                     \
+    vec2 vert = verts[gl_VertexID] * size;                                     \
+    vec2 uv = uvs[gl_VertexID];                                                \
+    vec3 pos = vec3(vert.xy * v_scale.xy, 0.0) + v_pos;                        \
+    pos.x *= iaspect;                                                          \
+    gl_Position = vec4(pos, 1.0);                                              \
+    f_col = v_col;                                                             \
+    f_uvw = vec3(uv.s * v_scale_u, uv.t, v_tile_level);                        \
+  }                                                                            \
 }                                                                              \
 ";
 
@@ -184,6 +189,9 @@ out vec4 frag_col;                                                             \
                                                                                \
 void main(void) {                                                              \
     vec4 t = texture(tile_tx, f_uvw);                                          \
+    if (t.a < 0.001) {                                                         \
+      discard;                                                                 \
+    }                                                                          \
     int ia = int(t.a * 255.0);                                                 \
     int ia_msb = (ia & 0x80) >> 7;                                             \
     vec3 c = ia_msb > 0 ? f_col.rgb : t.rgb;                                   \
@@ -811,7 +819,7 @@ void start(void) {
     f32 kpos1                           = xorshift64(&pos_st) / (f32)U64_MAX;
     s_sprites.pos[i * 3 + 0]            = lerpf32(kpos0, bounds[0], bounds[1]);
     s_sprites.pos[i * 3 + 1]            = lerpf32(kpos1, bounds[2], bounds[3]);
-    s_sprites.pos[i * 3 + 2]            = (f32)i / SPRITES_COUNT;
+    s_sprites.pos[i * 3 + 2]            = 0.0f;
     s_sprites.anim_idx[i * 1 + 0]       = ANIM_BUSH;
     s_sprites.anim_t[i * 1 + 0]         = (f32)i / SPRITES_COUNT;
     s_sprites.scale[i * 2 + 0]          = 1.0f;
@@ -832,10 +840,10 @@ void start(void) {
     EXPECT(SPRITES_COUNT > 0, "There has to be at least 1 sprite");
 
     i32 first_lover_idx = PLAYER_IDX + 1;
-    s_sprites.pos[first_lover_idx * 3 + 0] = bounds[1] - 0.25;
-    s_sprites.pos[first_lover_idx * 3 + 1] = 0.0;
+    s_sprites.pos[first_lover_idx * 3 + 0] = bounds[1] - 0.25f;
+    s_sprites.pos[first_lover_idx * 3 + 1] = 0.0f;
     s_sprites.vel[first_lover_idx * 2 + 0] = -SPRITE_VEL_MAX;
-    s_sprites.vel[first_lover_idx * 2 + 1] = 0.0;
+    s_sprites.vel[first_lover_idx * 2 + 1] = 0.0f;
     s_sprites.pos[PLAYER_IDX * 3 + 0] = -0.3;
     s_sprites.pos[PLAYER_IDX * 3 + 1] = 0.0f;
     s_sprites.vel[PLAYER_IDX * 2 + 0] = 0.0f;
@@ -1256,6 +1264,7 @@ void start(void) {
         s_sprites.pos_prev[i * 3 + 1]   = pos[1];
         s_sprites.pos[i * 3 + 0]        = pos[0];
         s_sprites.pos[i * 3 + 1]        = pos[1];
+        s_sprites.pos[i * 3 + 2]        = pos[1]; // z - y
         s_sprites.vel[i * 2 + 0]        = vel[0];
         s_sprites.vel[i * 2 + 1]        = vel[1];
         s_sprites.col[i * 4 + 0]        = col[0];
@@ -1273,10 +1282,12 @@ void start(void) {
     }
 
     // Draw
-    glClearColor(0.34, 0.44f, 0.25, fade_in_a);
-    glClear(GL_COLOR_BUFFER_BIT);
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_DEPTH_TEST);
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClearColor(0.34, 0.44f, 0.25, fade_in_a);
 
     // Draw sprites
     glBindBuffer(GL_ARRAY_BUFFER, pos_bo);
