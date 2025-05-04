@@ -40,6 +40,8 @@ Arrows on the keyboard control blue lover.
 - Sprite animation.
 - Some simple game logic.
 
+https://github.com/user-attachments/assets/745f3da5-ec2c-4ae3-abec-6852187c4f96
+
 ### Build all
 ```
 ./build.sh
