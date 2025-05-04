@@ -1,4 +1,4 @@
-// Find your lovers.
+// Find your lover.
 //
 // Platforms
 //   macOS AArch64
@@ -35,8 +35,8 @@ enum {
   STRANGERS_COUNT = SPRITES_COUNT - LOVERS_COUNT - BUSHES_COUNT,
 };
 enum {
-  PLAYER_IDX = 0, // player is lover #0
-  PLAYER_COUNT = 1, // player is lover #0
+  PLAYER_IDX = 0,   // player is lover #0
+  PLAYER_COUNT = 1,
 };
 
 static_assert(SPRITES_COUNT >= LOVERS_COUNT, "Index out of bound");
@@ -778,7 +778,7 @@ void start(void) {
   };
 
   struct xorshift64_state vel_st  = {137382305742834};
-  struct xorshift64_state pos_st  = {235936748814573};
+  struct xorshift64_state pos_st  = {535936748814573};
   struct xorshift64_state dir_st  = {323687463988431};
 
   // Spawn

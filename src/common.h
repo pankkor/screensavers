@@ -21,6 +21,7 @@ typedef i32                 b32;
 #define NO_RETURN           __attribute__((noreturn))
 #define ALIGNED(x)          __attribute__((aligned(x)))
 #define ARRAY_COUNT(x)      (i64)(sizeof(x) / sizeof(x[0]))
+#define static_assert       _Static_assert
 
 #define SWAP(a, b)                                                             \
   do {                                                                         \

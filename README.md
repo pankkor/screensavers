@@ -31,6 +31,15 @@ Matching keys and keyholes dissapear.
 
 https://github.com/user-attachments/assets/eb9552e4-32e3-4b9c-8be6-1a401453ae10
 
+## Lovers minigame
+`src/lovers.c`
+
+Help lovers (with flower bouquets) find each other.
+Arrows on the keyboard control blue lover.
+
+- Sprite animation.
+- Some simple game logic.
+
 ### Build all
 ```
 ./build.sh
@@ -41,6 +50,7 @@ Binaries are located in `build` directory.
 ```
 ./build/keyhole
 ./build/wind
+./build/lovers
 ```
 
 ### Files
