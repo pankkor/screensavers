@@ -11,6 +11,7 @@
 
 // TODO:
 // - Alpha blending when sprites fade out is bugged with depth-test
+//   - Dithering transparency
 
 // --------------------------------------
 // Config

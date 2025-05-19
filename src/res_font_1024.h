@@ -3,6 +3,11 @@ enum {
   FONT_TX_H = 1024,
 };
 
+enum {
+  FONT_GLYPHS_W = 16,
+  FONT_GLYPHS_H = 16,
+};
+
 // 96x96 RGBA8 glyph tile map. 16 glyphs x 16 glyphs
 // Little endian colors: 0xA8B8G8R8
 static const u32 s_font_tx_data[FONT_TX_W * FONT_TX_H] = {
