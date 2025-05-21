@@ -59,21 +59,18 @@ in vec2 f_uv;                                                                  \
 uniform sampler2D font_tx;                                                     \
 uniform usamplerBuffer text_buf;                                               \
                                                                                \
-uniform ivec2 buf_sz;       /* buffer size */                                  \
+uniform ivec2 buf_size;                                                        \
 uniform ivec2 glyphs_count; /* number of glyphs in atlas row and column */     \
                                                                                \
 out vec4 frag_col;                                                             \
                                                                                \
 void main(void) {                                                              \
-  int buf_i = int(f_uv.s * buf_sz.x) + int(f_uv.t * buf_sz.y) * buf_sz.x;      \
-  uint gi = texelFetch(text_buf, buf_i).r;                                     \
-  uint giy = gi / glyphs_count.y;                                              \
-  uint gix = gi - giy * glyphs_count.x;                                        \
-  vec2 offset = vec2(gix, giy);                                                \
-  vec2 uv = (mod(f_uv * buf_sz, vec2(1.0)) + offset) / glyphs_count;           \
-  vec4 t = texture(font_tx, uv);                                               \
-  frag_col = vec4(uv.st, 0.0, 1.0);                                            \
-  frag_col = t;                                                                \
+  ivec2 buf_pos = ivec2(f_uv * buf_size);                                      \
+  int buf_idx = buf_pos.x + buf_pos.y * buf_size.x;                            \
+  uint c = texelFetch(text_buf, buf_idx).r;                                    \
+  vec2 glyph_pos = vec2(c % glyphs_count.x, c / glyphs_count.y);               \
+  vec2 uv = (glyph_pos + mod(f_uv * buf_size, 1.0)) / glyphs_count;            \
+  frag_col = texture(font_tx, uv);                                             \
 }                                                                              \
 ";
 
@@ -143,7 +140,7 @@ void start(void) {
   glUniform1i(glGetUniformLocation(text_prog, "text_buf"), 1);
   glUniform1f(glGetUniformLocation(text_prog, "iaspect"), iaspect);
   glUniform2f(glGetUniformLocation(text_prog, "size"), size[0], size[1]);
-  glUniform2i(glGetUniformLocation(text_prog, "buf_sz"), TEXT_W, TEXT_H);
+  glUniform2i(glGetUniformLocation(text_prog, "buf_size"), TEXT_W, TEXT_H);
   glUniform2i(glGetUniformLocation(text_prog, "glyphs_count"), FONT_GLYPHS_W, FONT_GLYPHS_H);
 
   // Logic
