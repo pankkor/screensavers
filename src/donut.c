@@ -1,16 +1,15 @@
-// Bitmap font
+// ASCII donut
 //
 // Platforms
 //   macOS AArch64
 // Build
 //   ./build.sh
 // Run
-//   ./build/font
+//   ./build/donut
 
 #include "common.h"
 
 #include "res_font_256.h"
-#include "res_ascii_anim.h"
 
 enum {
   TEXT_W = 80,
@@ -21,11 +20,7 @@ enum {
 u32 TEXT_COLOR_RGBA = 0xCFDFFFFF; // 0xRRGGBBAA
 
 // Text that only fits on the screen
-ALIGNED(16) u8 s_text[TEXT_W * TEXT_H] =
-"                                                                                "
-"Hello Bitmap Font!                                                              "
-"1234567890-=`~!@#$%^&*(),.<>:\"/;'[]{}\\|                                         "
-;
+ALIGNED(16) u8 s_text[TEXT_W * TEXT_H];
 
 u8 s_luminance[] = ".,-~:;=!*#$@";
 
@@ -42,7 +37,7 @@ out vec2 f_uv;                                                               \r\
 out vec4 f_color;                                                            \r\
                                                                              \r\
 const vec2 verts[4] = vec2[](                                                \r\
-  vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0), vec2(1.0, 1.0)         \r\
+  vec2(-0.5, -0.5), vec2(0.5, -0.5), vec2(-0.5, 0.5), vec2(0.5, 0.5)         \r\
 );                                                                           \r\
 const vec2 uvs[4] = vec2[](                                                  \r\
   vec2(0.0, 1.0), vec2(1.0, 1.0), vec2(0.0, 0.0), vec2(1.0, 0.0)             \r\
@@ -85,6 +80,71 @@ void main(void) {                                                            \r\
   frag_col = f_color * a;                                                    \r\
 }                                                                            \r\
 ";
+
+enum {W = TEXT_W, H = TEXT_H};
+f32 depth[W * H];
+
+void donut(f32 turns1, f32 turns2) {
+  for (i32 i = 0; i < ARRAY_COUNT(depth); ++i) {
+    depth[i] = 0.0f;
+  }
+
+  f32 R1 = 1;
+  f32 R2 = 2;
+  f32 K2 = 5;
+  f32 K1 = H*K2*3/(8*(R1+R2));
+
+  // Angles are in turns
+  for (f32 theta = 0.0f; theta < 1.0f; theta += 0.012f) {
+    f32 cos_theta = cosf32(theta);
+    f32 sin_theta = sinf32(theta);
+
+    for (f32 phi = 0.0f; phi < 1.0f; phi += 0.003f) {
+      f32 cos_phi = cosf32(phi);
+      f32 sin_phi = sinf32(phi);
+
+      f32 x = (R2 + R1 * sin_theta) * cos_phi;
+      f32 y = (R2 + R1 * sin_theta) * sin_phi;
+      f32 z = R1 * cos_theta;
+
+      f32 v[3] = {x, y, z};
+
+      f32 axis[3] = {0.70710678f, 0.70710678f, 0.0};
+      f32 axis_y[3] = {0.0, 1.0, 0.0};
+
+      f32 qx[4];
+      f32 qy[4];
+      f32 q[4];
+      q4_axis_angle(qx, axis, turns1);
+      q4_axis_angle(qy, axis_y, turns2);
+      mul_q4_q4(q, qx, qy);
+
+      f32 v1[3];
+      rot_v3_q4(v1, v, q);
+
+      x = v1[0];
+      y = v1[1];
+      z = v1[2];
+
+      z += K2;
+
+      f32 iz = 1.0f / z;
+
+      i32 xp = (i32)(W / 2.0f + K1 * iz * x);
+      i32 yp = (i32)(H / 2.0f - K1 * iz * y);
+
+      i32 idx = xp + yp * W;
+
+
+      if (xp >= 0 && xp < W && yp >= 0 && yp < H) {
+        if (iz > depth[idx]) {
+          depth[idx] = iz;
+          s_text[idx] = 'X';
+        }
+      }
+    }
+  }
+}
 
 // --------------------------------------
 // Entry point (aka main)
@@ -139,7 +199,6 @@ void start(void) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glGenerateMipmap(GL_TEXTURE_2D);
 
   // On screen text buffer
   glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
@@ -170,23 +229,9 @@ void start(void) {
   u64 loop_count      = 0;
   f32 print_dt_tsc    = tsc + 5.0f * cpu_timer_freq;
 
-  i32 anim_w          = ANIM_ASCII_W;
-  i32 anim_h          = ANIM_ASCII_H;
-  i32 anim_f_count    = ANIM_ASCII_FRAME_COUNT;
-  u32 anim_fps        = 2;
-
-  f32 anim_t          = 0.0f; // not normalized, range [0, anim_f_count)
-
-  // Animation position in text buffer in [l, r), where  l - left, r - right
-  i32 anim_dst_lx     = MAX((TEXT_W - ANIM_ASCII_W) * 0.5f, 0.0f);
-  i32 anim_dst_ly     = MAX((TEXT_H - ANIM_ASCII_H) * 0.5f, 0.0f);
-  i32 anim_dst_rx     = MIN(anim_dst_lx + ANIM_ASCII_W, TEXT_W);
-  i32 anim_dst_ry     = MIN(anim_dst_ly + ANIM_ASCII_H, TEXT_H);
-
-  i32 anim_copy_w     = anim_dst_rx - anim_dst_lx;
-  i32 anim_copy_h     = anim_dst_ry - anim_dst_ly;
-
-  f32 bg_anim_t       = 0.0f; // normalized [0; 1.0)
+  // Donut
+  f32 turns1          = 0.0f;   // normalized [0; 1.0) in turns [0; 2pi)
+  f32 turns2          = 0.0f;   // normalized [0; 1.0) in turns [0; 2pi)
 
   while (1) {
     // dt bookkeeping
@@ -215,33 +260,16 @@ void start(void) {
 
     // ESC to exit
     if (loop.keycodes.e[KC_ESC]) {
-      goto shutdown;
+      goto shutdown; }
+
+    // Clear
+    for (i32 i = 0; i < TEXT_W * TEXT_H; ++i) {
+      s_text[i] = ' ';
     }
 
-    // Animate background
-    bg_anim_t = fmodf32(bg_anim_t + dt, 1.0f);
-
-    for (i32 x = 0; x < TEXT_W; ++x) {
-      for (i32 y = 3; y < TEXT_H; ++y) {
-        f32 l = 0.25f * cosf32(bg_anim_t + 0.02f * x) + 0.25f;
-        f32 k = 0.25f * sinf32(bg_anim_t + 0.02f * y) + 0.25f;
-        i32 idx = (l + k) * ARRAY_COUNT(s_luminance) - 1;
-        s_text[x + TEXT_W * y] = s_luminance[idx];
-      }
-    }
-
-    // ASCII animation
-    anim_t = fmodf32(anim_t + dt * anim_fps, anim_f_count);
-    i32 anim_idx = anim_t;
-    u8 *anim_src = &s_anim_ascii[anim_w * anim_h * anim_idx];
-
-    for (i32 y = 0; y < anim_copy_h; ++y) {
-      i32 dst_y = anim_dst_ly + y;
-      for (i32 x = 0; x < anim_copy_w; ++x) {
-        i32 dst_x = anim_dst_lx + x;
-        s_text[dst_x + TEXT_W * dst_y] = anim_src[x + anim_w * y];
-      }
-    }
+    turns1 = fmodf32(turns1 + 0.25f * dt, 1.0f);
+    turns2 = fmodf32(turns2 + 0.75f * dt, 1.0f); // rotate a but slower
+    donut(turns1, turns2);
 
     // Draw
     glEnable(GL_BLEND);

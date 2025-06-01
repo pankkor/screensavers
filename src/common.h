@@ -42,76 +42,10 @@ typedef i32                 b32;
     a_ <= b_ ? a_ : b_;                                                        \
 })
 
-#define GL_SILENCE_DEPRECATION
-#include <OpenGL/OpenGL.h>
-#include <OpenGL/gl3.h>
-#include <OpenGL/gl3ext.h>
-#include <CoreGraphics/CoreGraphics.h>
-
-// --------------------------------------
-// Private CoreGraphics API
-// --------------------------------------
-typedef enum {
-  kCGSOrderBelow = -1,
-  kCGSOrderOut,       // hides the window
-  kCGSOrderAbove,
-  kCGSOrderIn         // shows the window
-} CGSWindowOrderingMode;
-
-typedef int CGSConnectionID;
-typedef int CGSSurfaceID;
-typedef unsigned long long CGSSpaceID;
-typedef CFTypeRef CGSRegionRef;
-
-extern CGSConnectionID CGSMainConnectionID(void);
-
-extern CGError CGSNewWindow(CGSConnectionID cid,
-    CGWindowBackingType backingType, CGFloat left, CGFloat top,
-    CGSRegionRef region, CGWindowID *outWID);
-
-extern CGError CGSReleaseWindow(CGSConnectionID cid, CGWindowID wid);
-
-extern CGContextRef CGWindowContextCreate(CGSConnectionID cid,
-    CGWindowID wid, CFDictionaryRef options);
-
-extern CGError CGSFlushWindow(CGSConnectionID cid, CGWindowID wid,
-    CGSRegionRef flushRegion);
-
-extern CGError CGSNewRegionWithRect(const CGRect *rect, CGSRegionRef *out);
-
-extern CGError CGSSetWindowLevel(CGSConnectionID cid, CGWindowID wid,
-    CGWindowLevel level);
-
-extern CGError CGSOrderWindow(CGSConnectionID cid, CGWindowID wid,
-    CGSWindowOrderingMode mode, CGWindowID relativeToWID);
-
-extern CGError CGSSetWindowOpacity(CGSConnectionID cid, CGWindowID wid,
-    bool isOpaque);
-
-extern CGError CGSSetWindowTags(const CGSConnectionID cid, CGWindowID wid,
-    int *tag, int tagSize); // tag could be i32 or i64 with tagSize 32 or 64
-
-extern CGError CGSAddSurface(CGSConnectionID cid, CGWindowID wid,
-    CGSSurfaceID *outSID);
-
-extern CGError CGSOrderSurface(CGSConnectionID cid, CGWindowID wid,
-    CGSSurfaceID surface, CGSSurfaceID otherSurface, int place);
-
-extern CGError CGSSetSurfaceBounds(CGSConnectionID cid, CGWindowID wid,
-    CGSSurfaceID sid, CGRect bounds);
-
-extern CGLError CGLSetSurface(CGLContextObj glctx, CGSConnectionID cid,
-    CGWindowID wid, CGSSurfaceID sid);
-
-extern CGSSpaceID CGSGetActiveSpace(CGSConnectionID connection);
-
-extern void CGSAddWindowsToSpaces(CGSConnectionID cid, CFArrayRef windows,
-    CFArrayRef spaces);
-
 // --------------------------------------
 // syscall
 // --------------------------------------
-static i64 syscall1(i64 sys_num, i64 a0) {
+FORCE_INLINE static i64 syscall1(i64 sys_num, i64 a0) {
   i64 ret;
   __asm__ volatile (
     "mov x16,     %[sys_num]\n"   // syscall number
@@ -125,7 +59,7 @@ static i64 syscall1(i64 sys_num, i64 a0) {
   return ret;
 }
 
-static i64 syscall2(i64 sys_num, i64 a0, i64 a1) {
+FORCE_INLINE static i64 syscall2(i64 sys_num, i64 a0, i64 a1) {
   i64 ret;
   __asm__ volatile (
     "mov x16,     %[sys_num]\n"
@@ -140,7 +74,7 @@ static i64 syscall2(i64 sys_num, i64 a0, i64 a1) {
   return ret;
 }
 
-static i64 syscall3(i64 sys_num, i64 a0, i64 a1, i64 a2) {
+FORCE_INLINE static i64 syscall3(i64 sys_num, i64 a0, i64 a1, i64 a2) {
   i64 ret;
   __asm__ volatile (
     "mov x16,     %[sys_num]\n"
@@ -163,7 +97,7 @@ static i64 syscall3(i64 sys_num, i64 a0, i64 a1, i64 a2) {
 #define SYS_write       4
 
 // TODO EINTR
-NO_RETURN void exit(i32 ec) {
+FORCE_INLINE static NO_RETURN void exit(i32 ec) {
   syscall1(SYS_exit, ec);
   __builtin_unreachable();
 }
@@ -310,6 +244,60 @@ static void print_f32(i32 fd, f32 v) {
   }
 }
 
+static void print_f32s(i32 fd, i32 size, f32 arr[size]) {
+  if (size > 0) {
+    print_cstr(fd, "{");
+    print_f32(fd, arr[0]);
+    for (i32 i = 1; i < size; ++i) {
+      print_cstr(fd, ", ");
+      print_f32(fd, arr[i]);
+    }
+    print_cstr(fd, "}");
+  }
+}
+
+FORCE_INLINE static void print_v3(i32 fd, f32 v[3]) {
+  print_f32s(fd, 3, v);
+}
+
+FORCE_INLINE static void print_v4(i32 fd, f32 v[4]) {
+  print_f32s(fd, 4, v);
+}
+
+// Print average FPS and Delta time
+FORCE_INLINE static void print_avg_dt_fps(f32 avg_dt) {
+  print_cstr(STDOUT, "Average fps: ");
+  print_i64(STDOUT, (u64)(1.0f / avg_dt));
+  print_cstr(STDOUT, ", dt: ");
+  print_i64(STDOUT, (u64)(avg_dt * 1e3));
+  print_cstr(STDOUT, "ms (");
+  print_i64(STDOUT, (u64)(avg_dt * 1e6));
+  print_cstr(STDOUT, "us)\n");
+}
+
+// --------------------------------------
+// Helper
+// --------------------------------------
+FORCE_INLINE static b32 is_bit_set(i32 flags, i32 bit) {
+  return (flags & bit) == bit;
+}
+
+// --------------------------------------
+// Time Stamp Counter
+// --------------------------------------
+FORCE_INLINE static u64 read_cpu_timer_freq(void) {
+  u64 val;
+  __asm__ volatile ("mrs %0, cntfrq_el0" : "=r" (val));
+  return val;
+}
+
+FORCE_INLINE static u64 read_cpu_timer(void) {
+  u64 val;
+  // use isb to avoid speculative read of cntvct_el0
+  __asm__ volatile ("isb;\n\tmrs %0, cntvct_el0" : "=r" (val));
+  return val;
+}
+
 // --------------------------------------
 // Expect/Assert
 // --------------------------------------
@@ -352,7 +340,7 @@ FORCE_INLINE static void warn_if_msg(i32 condition, const char *msg) {
 }
 
 // --------------------------------------
-// Helpers
+// Rand
 // --------------------------------------
 // TODO: this doesn't seem to be a good random
 struct xorshift64_state {
@@ -360,13 +348,16 @@ struct xorshift64_state {
 };
 
 FORCE_INLINE static u64 xorshift64(struct xorshift64_state *state) {
-  uint64_t x = state->a;
+  u64 x = state->a;
   x ^= x << 7;
   x ^= x >> 9;
   state->a = x;
   return x;
 }
 
+// --------------------------------------
+// Math
+// --------------------------------------
 FORCE_INLINE static f32 clampf32(f32 v, f32 lo, f32 hi) {
   return v > hi ? hi : v < lo ? lo : v;
 }
@@ -383,21 +374,6 @@ FORCE_INLINE static f32 sqrtf32(f32 x) {
     : [x] "w" (x)
   );
   return res;
-}
-
-FORCE_INLINE static f32 len32x2(const f32 a[2]) {
-  return sqrtf32(a[0] * a[0] + a[1] * a[1]);
-}
-
-FORCE_INLINE static void normf32x2(const f32 a[2], f32 out[2]) {
-  f32 l = len32x2(a);
-  out[0] /= l;
-  out[1] /= l;
-}
-
-FORCE_INLINE static void dotf32x2(const f32 a[2], const f32 b[2], f32 out[2]) {
-  out[0] = a[0] * b[0];
-  out[1] = a[1] * b[1];
 }
 
 // TODO: loses precisions when x and y range is big
@@ -449,32 +425,133 @@ f32 cosf32(f32 turns) {
   return sinf32(0.25 - turns);
 }
 
-FORCE_INLINE static b32 is_bit_set(i32 flags, i32 bit) {
-  return (flags & bit) == bit;
+FORCE_INLINE static f32 len_v2(const f32 v[2]) {
+  return sqrtf32(v[0] * v[0] + v[1] * v[1]);
 }
 
-FORCE_INLINE static u64 read_cpu_timer_freq(void) {
-  u64 val;
-  __asm__ volatile ("mrs %0, cntfrq_el0" : "=r" (val));
-  return val;
+FORCE_INLINE static f32 len_v3(const f32 v[3]) {
+  return sqrtf32(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
 }
 
-FORCE_INLINE static u64 read_cpu_timer(void) {
-  u64 val;
-  // use isb to avoid speculative read of cntvct_el0
-  __asm__ volatile ("isb;\n\tmrs %0, cntvct_el0" : "=r" (val));
-  return val;
+FORCE_INLINE static f32 len_v4(const f32 v[4]) {
+  return sqrtf32(v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]);
 }
 
-// Print average FPS and Delta time
-FORCE_INLINE static void print_avg_dt_fps(f32 avg_dt) {
-  print_cstr(STDOUT, "Average fps: ");
-  print_i64(STDOUT, (u64)(1.0f / avg_dt));
-  print_cstr(STDOUT, ", dt: ");
-  print_i64(STDOUT, (u64)(avg_dt * 1e3));
-  print_cstr(STDOUT, "ms (");
-  print_i64(STDOUT, (u64)(avg_dt * 1e6));
-  print_cstr(STDOUT, "us)\n");
+FORCE_INLINE static void norm_v2(f32 inout[2]) {
+  f32 ret[2];
+  f32 l = len_v2(inout);
+  ret[0] /= l;
+  ret[1] /= l;
+  inout[0] = ret[0]; inout[1] = ret[1];
+}
+
+/*
+  out[0] = ret[0]; out[1] = ret[1]; out[2] = ret[2]; out[3] = ret[3];
+*/
+
+FORCE_INLINE static void norm_v3(f32 inout[3]) {
+  f32 ret[3];
+  f32 l = len_v3(inout);
+  ret[0] /= l;
+  ret[1] /= l;
+  ret[2] /= l;
+  *inout = *ret;
+  inout[0] = ret[0]; inout[1] = ret[1]; inout[2] = ret[2];
+}
+
+FORCE_INLINE static void norm_v4(f32 inout[4]) {
+  f32 ret[4];
+  f32 l = len_v4(inout);
+  ret[0] /= l;
+  ret[1] /= l;
+  ret[2] /= l;
+  ret[3] /= l;
+  inout[0] = ret[0]; inout[1] = ret[1]; inout[2] = ret[2]; inout[3] = ret[3];
+}
+
+FORCE_INLINE static f32 dot_v2(const f32 v1[2], const f32 v2[2]) {
+  return v1[0] * v2[0] + v1[1] * v2[1];
+}
+
+FORCE_INLINE static f32 dot_v3(const f32 v1[3], const f32 v2[3]) {
+  return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
+}
+
+FORCE_INLINE static void cross_v3(
+    f32 out[3], const f32 v1[3], const f32 v2[3]) {
+  f32 ret[3];
+  ret[0] = v1[1] * v2[2] - v1[2] * v2[1];
+  ret[1] = v1[2] * v2[0] - v1[0] * v2[2];
+  ret[2] = v1[0] * v2[1] - v1[1] * v2[0];
+  out[0] = ret[0]; out[1] = ret[1]; out[2] = ret[2];
+}
+
+// k * vector 3
+void mul_v3_k(f32 out[3], const f32 v[3], f32 k) {
+  f32 ret[3];
+  ret[0] = v[0] * k;
+  ret[1] = v[1] * k;
+  ret[2] = v[2] * k;
+  out[0] = ret[0]; out[1] = ret[1]; out[2] = ret[2];
+}
+
+// Quaternion (x, y, z, w): in normalized axis, angle in turns (1 turn = 2pi)
+void q4_axis_angle(f32 out[4], const f32 axis[3], f32 turns) {
+  f32 ret[4];
+  f32 t = turns * 0.5f;
+  f32 sin_t = sinf32(t);
+  ret[0] = axis[0] * sin_t;
+  ret[1] = axis[1] * sin_t;
+  ret[2] = axis[2] * sin_t;
+  ret[3] = cosf32(t);
+  out[0] = ret[0]; out[1] = ret[1]; out[2] = ret[2]; out[3] = ret[3];
+}
+
+// Unit quaternion conjugate q^-1
+void conj_q4(f32 out[4], const f32 q[4]) {
+  f32 ret[4];
+  ret[0] = -q[0];
+  ret[1] = -q[1];
+  ret[2] = -q[2];
+  ret[3] =  q[3];
+  out[0] = ret[0]; out[1] = ret[1]; out[2] = ret[2]; out[3] = ret[3];
+}
+
+// Multiply 2 quaternions q1*q2
+void mul_q4_q4(f32 out[4], const f32 q1[4], const f32 q2[4]) {
+  f32 ret[4];
+  f32 dot = dot_v3(q1, q2);
+  f32 cross[3];
+  cross_v3(cross, q1, q2);
+
+  ret[0] = q1[3] * q2[0] + q2[3] * q1[0] + cross[0];
+  ret[1] = q1[3] * q2[1] + q2[3] * q1[1] + cross[1];
+  ret[2] = q1[3] * q2[2] + q2[3] * q1[2] + cross[2];
+  ret[3] = q1[3] * q2[3] - dot;
+  out[0] = ret[0]; out[1] = ret[1]; out[2] = ret[2]; out[3] = ret[3];
+}
+
+// Rotate point v3 around quaternion q4:
+// v' = q * v * q^-1, where q^-1 is conjugate(q)
+void rot_v3_q4(f32 out[3], const f32 v[3], const f32 q[4]) {
+  f32 ret[3];
+  f32 dotqv = dot_v3(v, q);
+  f32 dotqq = dot_v3(q, q);
+
+  // Simplified math:
+  // 2 * q.v • v * q.v + (q.w * q.w - q.v • q.v) * v + 2 * q.w * q.v ⨯ v ->
+  // k1 * q.v + k2 * v + k3 * q.v x v, where
+  f32 k1 = 2.0f * dotqv;
+  f32 k2 = q[3] * q[3] - dotqq;
+  f32 k3 = 2.0f * q[3];
+
+  f32 cross[3];
+  cross_v3(cross, q, v);
+
+  ret[0] = k1 * q[0] + k2 * v[0] + k3 * cross[0];
+  ret[1] = k1 * q[1] + k2 * v[1] + k3 * cross[1];
+  ret[2] = k1 * q[2] + k2 * v[2] + k3 * cross[2];
+  out[0] = ret[0]; out[1] = ret[1]; out[2] = ret[2];
 }
 
 // --------------------------------------
@@ -487,6 +564,72 @@ void __stack_chk_fail(void) {
     print_cstr(STDERR, "Stack smashed!\n");
     debugbreak();
 }
+
+#define GL_SILENCE_DEPRECATION
+#include <OpenGL/OpenGL.h>
+#include <OpenGL/gl3.h>
+#include <OpenGL/gl3ext.h>
+#include <CoreGraphics/CoreGraphics.h>
+
+// --------------------------------------
+// Private CoreGraphics API
+// --------------------------------------
+typedef enum {
+  kCGSOrderBelow = -1,
+  kCGSOrderOut,       // hides the window
+  kCGSOrderAbove,
+  kCGSOrderIn         // shows the window
+} CGSWindowOrderingMode;
+
+typedef int CGSConnectionID;
+typedef int CGSSurfaceID;
+typedef unsigned long long CGSSpaceID;
+typedef CFTypeRef CGSRegionRef;
+
+extern CGSConnectionID CGSMainConnectionID(void);
+
+extern CGError CGSNewWindow(CGSConnectionID cid,
+    CGWindowBackingType backingType, CGFloat left, CGFloat top,
+    CGSRegionRef region, CGWindowID *outWID);
+
+extern CGError CGSReleaseWindow(CGSConnectionID cid, CGWindowID wid);
+
+extern CGContextRef CGWindowContextCreate(CGSConnectionID cid,
+    CGWindowID wid, CFDictionaryRef options);
+
+extern CGError CGSFlushWindow(CGSConnectionID cid, CGWindowID wid,
+    CGSRegionRef flushRegion);
+
+extern CGError CGSNewRegionWithRect(const CGRect *rect, CGSRegionRef *out);
+
+extern CGError CGSSetWindowLevel(CGSConnectionID cid, CGWindowID wid,
+    CGWindowLevel level);
+
+extern CGError CGSOrderWindow(CGSConnectionID cid, CGWindowID wid,
+    CGSWindowOrderingMode mode, CGWindowID relativeToWID);
+
+extern CGError CGSSetWindowOpacity(CGSConnectionID cid, CGWindowID wid,
+    bool isOpaque);
+
+extern CGError CGSSetWindowTags(const CGSConnectionID cid, CGWindowID wid,
+    int *tag, int tagSize); // tag could be i32 or i64 with tagSize 32 or 64
+
+extern CGError CGSAddSurface(CGSConnectionID cid, CGWindowID wid,
+    CGSSurfaceID *outSID);
+
+extern CGError CGSOrderSurface(CGSConnectionID cid, CGWindowID wid,
+    CGSSurfaceID surface, CGSSurfaceID otherSurface, int place);
+
+extern CGError CGSSetSurfaceBounds(CGSConnectionID cid, CGWindowID wid,
+    CGSSurfaceID sid, CGRect bounds);
+
+extern CGLError CGLSetSurface(CGLContextObj glctx, CGSConnectionID cid,
+    CGWindowID wid, CGSSurfaceID sid);
+
+extern CGSSpaceID CGSGetActiveSpace(CGSConnectionID connection);
+
+extern void CGSAddWindowsToSpaces(CGSConnectionID cid, CFArrayRef windows,
+    CFArrayRef spaces);
 
 // --------------------------------------
 // Window
@@ -902,3 +1045,4 @@ static GLuint create_gl_shader_program(const char *vert_glsl,
 
   return prog;
 }
+
