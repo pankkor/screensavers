@@ -9,69 +9,81 @@
 
 #include "common.h"
 
-#include "res_font_1024.h"
+#include "res_font_256.h"
 #include "res_ascii_anim.h"
 
 enum {
   TEXT_W = 80,
-  TEXT_H = 40,
+  TEXT_H = 80,
   TEXTS_COUNT = 1,
 };
+
+u32 TEXT_COLOR_RGBA = 0xCFDFFFFF; // 0xRRGGBBAA
 
 // Text that only fits on the screen
 u8 s_text[TEXT_W * TEXT_H] =
 "                                                                                "
-"                                                                                "
-"                              Hello Bitmap Font!                                "
-"                                                                                "
-"                  1234567890-=`~!@#$%^&*(),.<>:\"/;'[]{}\\|                     "
+"Hello Bitmap Font!                                                              "
+"1234567890-=`~!@#$%^&*(),.<>:\"/;'[]{}\\|                                         "
 ;
+
+u8 s_luminance[] = ".,-~:;=!*#$@";
 
 // --------------------------------------
 // GLSL
 // --------------------------------------
-static const char * const s_text_vert_src = "                                  \
-#version 410 core                                                              \
-                                                                               \
-uniform vec2 size;                                                             \
-                                                                               \
-out vec2 f_uv;                                                                 \
-                                                                               \
-const vec2 verts[4] = vec2[](                                                  \
-  vec2(-0.5, -0.5), vec2(0.5, -0.5), vec2(-0.5, 0.5), vec2(0.5, 0.5)           \
-);                                                                             \
-const vec2 uvs[4] = vec2[](                                                    \
-  vec2(0.0, 1.0), vec2(1.0, 1.0), vec2(0.0, 0.0), vec2(1.0, 0.0)               \
-);                                                                             \
-                                                                               \
-void main(void) {                                                              \
-  vec2 vert = verts[gl_VertexID] * size;                                       \
-  vec2 uv = uvs[gl_VertexID];                                                  \
-  gl_Position = vec4(vert, 0.0, 1.0);                                          \
-  f_uv = uv;                                                                   \
-}                                                                              \
+static const char * const s_text_vert_src = "                                \r\
+#version 410 core                                                            \r\
+                                                                             \r\
+uniform vec2 size;                                                           \r\
+uniform uint color_rgba;                                                     \r\
+                                                                             \r\
+out vec2 f_uv;                                                               \r\
+out vec4 f_color;                                                            \r\
+                                                                             \r\
+const vec2 verts[4] = vec2[](                                                \r\
+  vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0), vec2(1.0, 1.0)         \r\
+);                                                                           \r\
+const vec2 uvs[4] = vec2[](                                                  \r\
+  vec2(0.0, 1.0), vec2(1.0, 1.0), vec2(0.0, 0.0), vec2(1.0, 0.0)             \r\
+);                                                                           \r\
+                                                                             \r\
+vec4 rgba2vec4(uint rgba) {                                                  \r\
+  return vec4((rgba >> 24) & 0xFFu, (rgba >> 16) & 0xFFu,                    \r\
+    (rgba >> 8) & 0xFFu, rgba & 0xFFu) / 255.0;                              \r\
+}                                                                            \r\
+                                                                             \r\
+void main(void) {                                                            \r\
+  vec2 vert = verts[gl_VertexID] * size;                                     \r\
+  vec2 uv = uvs[gl_VertexID];                                                \r\
+  gl_Position = vec4(vert, 0.0, 1.0);                                        \r\
+  f_uv = uv;                                                                 \r\
+  f_color = rgba2vec4(color_rgba);                                           \r\
+}                                                                            \r\
 ";
 
-static const char * const s_text_frag_src = "                                  \
-#version 410 core                                                              \
-in vec2 f_uv;                                                                  \
-                                                                               \
-uniform sampler2D font_tx;                                                     \
-uniform usamplerBuffer text_buf;                                               \
-                                                                               \
-uniform ivec2 buf_size;                                                        \
-uniform ivec2 glyphs_count; /* number of glyphs in atlas row and column */     \
-                                                                               \
-out vec4 frag_col;                                                             \
-                                                                               \
-void main(void) {                                                              \
-  ivec2 buf_pos = ivec2(f_uv * buf_size);                                      \
-  int buf_idx = buf_pos.x + buf_pos.y * buf_size.x;                            \
-  uint c = texelFetch(text_buf, buf_idx).r;                                    \
-  vec2 glyph_pos = vec2(c % glyphs_count.x, c / glyphs_count.y);               \
-  vec2 uv = (glyph_pos + mod(f_uv * buf_size, 1.0)) / glyphs_count;            \
-  frag_col = texture(font_tx, uv);                                             \
-}                                                                              \
+static const char * const s_text_frag_src = "                                \r\
+#version 410 core                                                            \r\
+in vec2 f_uv;                                                                \r\
+in vec4 f_color;                                                             \r\
+                                                                             \r\
+uniform sampler2D font_tx;                                                   \r\
+uniform usamplerBuffer text_buf;                                             \r\
+                                                                             \r\
+uniform ivec2 buf_size;                                                      \r\
+uniform ivec2 glyphs_count; /* number of glyphs in atlas row and column */   \r\
+                                                                             \r\
+out vec4 frag_col;                                                           \r\
+                                                                             \r\
+void main(void) {                                                            \r\
+  ivec2 buf_pos = ivec2(f_uv * buf_size);                                    \r\
+  int buf_idx = buf_pos.x + buf_pos.y * buf_size.x;                          \r\
+  uint c = texelFetch(text_buf, buf_idx).r;                                  \r\
+  vec2 glyph_pos = vec2(c % glyphs_count.x, c / glyphs_count.y);             \r\
+  vec2 uv = (glyph_pos + mod(f_uv * buf_size, 1.0)) / glyphs_count;          \r\
+  float a = texture(font_tx, uv).r;                                          \r\
+  frag_col = f_color * a;                                                    \r\
+}                                                                            \r\
 ";
 
 // --------------------------------------
@@ -102,9 +114,9 @@ void start(void) {
 
   f32 aspect  = w.rect[2] / w.rect[3];
   f32 iaspect = 1.0f / aspect;
-  f32 size[2];
-  size[0] = 42 * 80 / w.rect[2];
-  size[1] = 52 * 40 / w.rect[3];
+  f32 size[2] = { 1.0f, 1.0f };
+  size[0] = 1.0f * iaspect;
+  size[1] = 1.0f;
 
   GLuint vao;
   GLuint text_bo;
@@ -115,20 +127,23 @@ void start(void) {
   glBindVertexArray(vao);
 
   // Font texture
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
   glActiveTexture(GL_TEXTURE0);
   GLuint font_tx;
   glGenTextures(1, &font_tx);
   glBindTexture(GL_TEXTURE_2D, font_tx);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, FONT_TX_W, FONT_TX_H, 0,
-      GL_RGBA, GL_UNSIGNED_BYTE, s_font_tx_data);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, FONT_TX_W, FONT_TX_H, 0, GL_RED,
+      GL_UNSIGNED_BYTE, s_font_tx_data);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glGenerateMipmap(GL_TEXTURE_2D);
 
   // On screen text buffer
   glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
-  glBufferData(GL_TEXTURE_BUFFER, TEXT_W * TEXT_H, s_text, GL_DYNAMIC_DRAW);
+  glBufferData(GL_TEXTURE_BUFFER, TEXT_W * TEXT_H, s_text, GL_STREAM_DRAW);
 
   glActiveTexture(GL_TEXTURE1);
   GLuint tbo;
@@ -140,6 +155,7 @@ void start(void) {
   glUniform1i(glGetUniformLocation(text_prog, "text_buf"), 1);
   glUniform1f(glGetUniformLocation(text_prog, "iaspect"), iaspect);
   glUniform2f(glGetUniformLocation(text_prog, "size"), size[0], size[1]);
+  glUniform1ui(glGetUniformLocation(text_prog, "color_rgba"), TEXT_COLOR_RGBA);
   glUniform2i(glGetUniformLocation(text_prog, "buf_size"), TEXT_W, TEXT_H);
   glUniform2i(glGetUniformLocation(text_prog, "glyphs_count"), FONT_GLYPHS_W, FONT_GLYPHS_H);
 
@@ -162,8 +178,8 @@ void start(void) {
   f32 anim_t          = 0.0f; // not normalized, range [0, anim_f_count)
 
   // Animation position in text buffer in [l, r), where  l - left, r - right
-  i32 anim_dst_lx     = 6;
-  i32 anim_dst_ly     = 26;
+  i32 anim_dst_lx     = MAX((TEXT_W - ANIM_ASCII_W) * 0.5f, 0.0f);
+  i32 anim_dst_ly     = MAX((TEXT_H - ANIM_ASCII_H) * 0.5f, 0.0f);
   i32 anim_dst_rx     = MIN(anim_dst_lx + ANIM_ASCII_W, TEXT_W);
   i32 anim_dst_ry     = MIN(anim_dst_ly + ANIM_ASCII_H, TEXT_H);
 
@@ -171,8 +187,6 @@ void start(void) {
   i32 anim_copy_h     = anim_dst_ry - anim_dst_ly;
 
   // Scrolling thing
-  const u8 thing[]    = ".,-~:;=!*#$@";
-  i32 thing_count     = ARRAY_COUNT(thing);
   f32 thing_t         = 0.0f; // normalized [0; 1.0)
   i32 thing_y         = 3;
 
@@ -206,17 +220,16 @@ void start(void) {
       goto shutdown;
     }
 
-    // ASCII scrolling thing
-    // Clear
+    // ASCII thing
+    thing_t   = fmodf32(thing_t + dt, 1.0f);
+
     for (i32 x = 0; x < TEXT_W; ++x) {
-      s_text[x + TEXT_W * thing_y] = ' ';
-    }
-    thing_t   = fmodf32(thing_t + dt, 3.0f);
-    i32 x     = lerpf32(thing_t, 0, TEXT_W);
-    // Draw
-    for (i32 i = 0; i < thing_count; ++i) {
-      i32 dst_x = (x + i) % TEXT_W;
-      s_text[dst_x + TEXT_W * thing_y] = thing[i];
+      for (i32 y = thing_y; y < TEXT_H; ++y) {
+        f32 l = 0.25f * cosf32(thing_t + 0.02f * x) + 0.25f;
+        f32 k = 0.25f * sinf32(thing_t + 0.02f * y) + 0.25f;
+        i32 idx = (l + k) * ARRAY_COUNT(s_luminance) - 1;
+        s_text[x + TEXT_W * y] = s_luminance[idx];
+      }
     }
 
     // ASCII animation
@@ -237,11 +250,10 @@ void start(void) {
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
     glClear(GL_COLOR_BUFFER_BIT);
-    glClearColor(0.3f, 0.3f, 0.3f, 1.0f);
+    glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
 
     // Update text on the screen
     glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
-    // TODO: orphaning?
     glBufferData(GL_TEXTURE_BUFFER, TEXT_W * TEXT_H, 0, GL_DYNAMIC_DRAW); // Orphan
     glBufferSubData(GL_TEXTURE_BUFFER, 0, TEXT_W * TEXT_H, s_text);
 
@@ -250,9 +262,10 @@ void start(void) {
 
     window_flush(&w);
   }
-  print_avg_dt_fps(loop_s / loop_count);
 
 shutdown:
+  print_avg_dt_fps(loop_s / loop_count);
+
   // Shutdown
   glDeleteShader(text_prog);
 

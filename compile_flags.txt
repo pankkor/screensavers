@@ -5,7 +5,7 @@
 -Wno-fixed-enum-extension
 -Wno-gnu-statement-expression-from-macro-expansion
 -Wno-unused-function
--O1
+-O3
 -mcpu=native
 -g
 -ffreestanding

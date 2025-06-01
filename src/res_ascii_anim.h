@@ -4,6 +4,7 @@ enum {
   ANIM_ASCII_FRAME_COUNT = 4,
 };
 
+// Remix of animation by Simon Jansen (WWW.ASCIIMATION.CO.NZ)
 u8 s_anim_ascii[ANIM_ASCII_W * ANIM_ASCII_H * ANIM_ASCII_FRAME_COUNT] = {
 "                                      /~\\                           "
 "                                     ( oo|                          "
@@ -18,7 +19,7 @@ u8 s_anim_ascii[ANIM_ASCII_W * ANIM_ASCII_H * ANIM_ASCII_FRAME_COUNT] = {
 "                 |~ \\___/ ~|         []|[]                          "
 "                 /=\\ /=\\ /=\\         | | |                          "
 "_________________[_]_[_]_[_]________/_]_[_\\_________________________"
-"           Copyright Simon Jansen (WWW.ASCIIMATION.CO.NZ)           "
+"                                                                    "
 "                                      /~\\                           "
 "                                     ( oo|                          "
 "                                     _\\=/_                          "
@@ -32,7 +33,7 @@ u8 s_anim_ascii[ANIM_ASCII_W * ANIM_ASCII_H * ANIM_ASCII_FRAME_COUNT] = {
 "                 |~ \\___/ ~|         []|[]                          "
 "                 /=\\ /=\\ /=\\         | | |                          "
 "_________________[_]_[_]_[_]________/_]_[_\\_________________________"
-"           Copyright Simon Jansen (WWW.ASCIIMATION.CO.NZ)           "
+"                                                                    "
 "                                      /~\\                           "
 "                                     |oo )      We are doomed!      "
 "                                     _\\=/_                          "
@@ -46,7 +47,7 @@ u8 s_anim_ascii[ANIM_ASCII_W * ANIM_ASCII_H * ANIM_ASCII_FRAME_COUNT] = {
 "                 |~ \\___/ ~|         []|[]                          "
 "                 /=\\ /=\\ /=\\         | | |                          "
 "_________________[_]_[_]_[_]________/_]_[_\\_________________________"
-"           Copyright Simon Jansen (WWW.ASCIIMATION.CO.NZ)           "
+"                                                                    "
 "                                      /~\\                           "
 "                                     |oo )      We are doomed!      "
 "                                     _\\=/_                          "
@@ -60,6 +61,6 @@ u8 s_anim_ascii[ANIM_ASCII_W * ANIM_ASCII_H * ANIM_ASCII_FRAME_COUNT] = {
 "                 |~ \\___/ ~|         []|[]                          "
 "                 /=\\ /=\\ /=\\         | | |                          "
 "_________________[_]_[_]_[_]________/_]_[_\\_________________________"
-"           Copyright Simon Jansen (WWW.ASCIIMATION.CO.NZ)           "
+"                                                                    "
 };
 // "                                     ( oo|      We are doomed!      "

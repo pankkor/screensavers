@@ -444,6 +444,11 @@ f32 sinf32(f32 turns) {
   return (x - 1.0f) * (x + 1.0f) * p1 * x;
 }
 
+// Cosine in turns (1 turn == 2pi)
+f32 cosf32(f32 turns) {
+  return sinf32(0.25 - turns);
+}
+
 FORCE_INLINE static b32 is_bit_set(i32 flags, i32 bit) {
   return (flags & bit) == bit;
 }
@@ -791,7 +796,7 @@ static void event_loop_init(struct event_loop *loop) {
   EXPECT(event_tap, "CGEventTapCreate() failed");
 
   source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, event_tap, 0);
-  EXPECT(source, "CGEventTapCreate() failed");
+  EXPECT(source, "CFMachPortCreateRunLoopSource() failed");
 
   runloop = CFRunLoopGetCurrent();
   CFRetain(runloop);

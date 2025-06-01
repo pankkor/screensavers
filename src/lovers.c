@@ -1313,9 +1313,10 @@ void start(void) {
 
     window_flush(&w);
   }
-  print_avg_dt_fps(loop_s / loop_count);
 
 shutdown:
+  print_avg_dt_fps(loop_s / loop_count);
+
   // Shutdown
   glDeleteShader(sprite_prog);
 
