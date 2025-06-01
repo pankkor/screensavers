@@ -42,6 +42,14 @@ Arrows on the keyboard control blue lover.
 
 https://github.com/user-attachments/assets/745f3da5-ec2c-4ae3-abec-6852187c4f96
 
+## Bitmap font
+`src/font.c`
+
+Bitmap font.
+- 16x16 characters ASCII R8 bitmap atlas.
+- ASCII frame animation.
+
+
 ### Build all
 ```
 ./build.sh
@@ -53,11 +61,13 @@ Binaries are located in `build` directory.
 ./build/keyhole
 ./build/wind
 ./build/lovers
+./build/font
 ```
 
 ### Files
 - `src/*.c` - all screensavers, each screensaver is a separate `.c` file.
 - `src/common.h` - common code for screensavers.
+- `src/res_*.h` - resource files with binary data.
 - `build.sh` - build script.
 - `compile_flags.txt` - list of compilation flags used by clangd and `build.sh`.
 
