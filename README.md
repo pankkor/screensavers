@@ -49,6 +49,7 @@ Bitmap font.
 - 16x16 characters ASCII R8 bitmap atlas.
 - ASCII frame animation.
 
+https://github.com/user-attachments/assets/56f38c07-0ef0-4bfd-a538-c5e82ca7c3e9
 
 ### Build all
 ```
