@@ -27,7 +27,7 @@ ALIGNED(16) u8 s_text[TEXT_W * TEXT_H] =
 "1234567890-=`~!@#$%^&*(),.<>:\"/;'[]{}\\|                                         "
 ;
 
-u8 s_luminance[] = ".,-~:;=!*#$@";
+u8 s_luminance[12] = ".,-~:;=!*#$@"; // don't keep null terminator
 
 // --------------------------------------
 // GLSL
