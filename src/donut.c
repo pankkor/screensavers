@@ -142,9 +142,10 @@ void donut(f32 turns) {
 
       f32 iz = 1.0f / v[2]; // Inverse Z for depth test
 
-      // Projection p' = p * Z'/z
+      // Projection p' = p * Z'/z.
+      // Invert Y since we render into char buffer.
       i32 xp = (i32)(W / 2.0f + SCREEN_Z * iz * v[0]);
-      i32 yp = (i32)(H / 2.0f - SCREEN_Z * iz * v[1]); // '-' Y is inverted
+      i32 yp = (i32)(H / 2.0f - SCREEN_Z * iz * v[1]);
 
       // Check if projected point is in our screen buffer
       i32 idx = xp + yp * W;
