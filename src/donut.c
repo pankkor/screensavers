@@ -113,8 +113,8 @@ void donut(f32 turns) {
   // Phi - center of revolution of the torus (R2).
   // Choose delta Theta and Phi angles small enough so there are no visible gaps
   // Angles are in turns [0; 2pi)
-  f32 DTHETA = 0.012f;
-  f32 DPHI = 0.003;
+  f32 DTHETA = 0.006f;
+  f32 DPHI = 0.001;
 
   // Torus object space rotation
   f32 axis[3] = {0.0f, -0.70710678f, 0.70710678f};
@@ -163,10 +163,8 @@ void donut(f32 turns) {
 
           u8 c = s_luminance[lum_idx];
 
-          if (lum > -0.001f) {
-            depth[idx] = iz;
-            s_text[idx] = c;
-          }
+          depth[idx] = iz;
+          s_text[idx] = c;
         }
       }
     }
