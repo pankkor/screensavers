@@ -17,12 +17,12 @@ enum {
   TEXTS_COUNT = 1,
 };
 
-u32 TEXT_COLOR_RGBA = 0xCFDFFFFF; // 0xRRGGBBAA
+u32 TEXT_COLOR_RGBA = 0xFFCFDFFF; // 0xRRGGBBAA
 
 // Text that only fits on the screen
 ALIGNED(16) u8 s_text[TEXT_W * TEXT_H];
 
-u8 s_luminance[] = ".,-~:;=!*#$@";
+u8 s_luminance[12] = ".,-~:;=!*#$@"; // don't keep null terminator
 
 // --------------------------------------
 // GLSL
@@ -84,62 +84,88 @@ void main(void) {                                                            \r\
 enum {W = TEXT_W, H = TEXT_H};
 f32 depth[W * H];
 
-void donut(f32 turns1, f32 turns2) {
+void donut(f32 turns) {
+  // Clean inverse Z depth buffer
   for (i32 i = 0; i < ARRAY_COUNT(depth); ++i) {
     depth[i] = 0.0f;
   }
 
-  f32 R1 = 1;
-  f32 R2 = 2;
-  f32 K2 = 5;
-  f32 K1 = H*K2*3/(8*(R1+R2));
+  // Torus
+  f32 R1 = 1.0f; // minor radius (radius of the tube)
+  f32 R2 = 2.0f; // major radius (distance from the center of torus to the tube)
 
-  // Angles are in turns
-  for (f32 theta = 0.0f; theta < 1.0f; theta += 0.012f) {
+  // Projection on the screen
+  // p' = p * (Z'/z), where Z' - is constant screen Z.
+  f32 DONUT_Z = 5.0f; // Z - distance from the donut to the viewer
+  // SCREEN_Z - Z position of the screen. Choose it so donit's edge is ~3/4 to
+  // the scren edge.
+  // X axis: R1+R2 is the farthest point on the torus at object space obj_z = 0.
+  // We want it to be 3/4 of the screen edge from center, or 3/8 from origin.
+  // SCREEN_W * 3/8 = SCREEN_Z * (R1 + R2) / (DONUT_Z + obj_z), obj_z = 0.
+  // From that SCREEN_Z is:
+  f32 SCREEN_Z = 3.0f / 8.0f * W * DONUT_Z / (R1 + R2);
+
+  // L - direction to light source.
+  f32 L[3] = {-0.57735027f, 0.57735027f, -0.57735027f};
+  f32 DIFFUSE = 0.01f;
+
+  // Theta - torus tube circle (R1).
+  // Phi - center of revolution of the torus (R2).
+  // Choose delta Theta and Phi angles small enough so there are no visible gaps
+  // Angles are in turns [0; 2pi)
+  f32 DTHETA = 0.012f;
+  f32 DPHI = 0.003;
+
+  // Torus object space rotation
+  f32 axis[3] = {0.0f, -0.70710678f, 0.70710678f};
+  f32 q[4];
+  q4_axis_angle(q, axis, turns);
+
+  for (f32 theta = 0.0f; theta < 1.0f; theta += DTHETA) {
     f32 cos_theta = cosf32(theta);
     f32 sin_theta = sinf32(theta);
 
-    for (f32 phi = 0.0f; phi < 1.0f; phi += 0.003f) {
+    for (f32 phi = 0.0f; phi < 1.0f; phi += DPHI) {
       f32 cos_phi = cosf32(phi);
       f32 sin_phi = sinf32(phi);
 
-      f32 x = (R2 + R1 * sin_theta) * cos_phi;
-      f32 y = (R2 + R1 * sin_theta) * sin_phi;
-      f32 z = R1 * cos_theta;
+      // Point on torus, object space
+      f32 v[3] = {
+       (R2 + R1 * cos_theta) * cos_phi,
+       R1 * sin_theta,
+       -(R2 + R1 * cos_theta) * sin_phi,
+      };
 
-      f32 v[3] = {x, y, z};
+      rot_v3_q4(v, v, q); // Rotated point, object space
 
-      f32 axis[3] = {0.70710678f, 0.70710678f, 0.0};
-      f32 axis_y[3] = {0.0, 1.0, 0.0};
+      v[2] += DONUT_Z; // Translate away from the viewer along Z axis
 
-      f32 qx[4];
-      f32 qy[4];
-      f32 q[4];
-      q4_axis_angle(qx, axis, turns1);
-      q4_axis_angle(qy, axis_y, turns2);
-      mul_q4_q4(q, qx, qy);
+      f32 iz = 1.0f / v[2]; // Inverse Z for depth test
 
-      f32 v1[3];
-      rot_v3_q4(v1, v, q);
+      // Projection p' = p * Z'/z
+      i32 xp = (i32)(W / 2.0f + SCREEN_Z * iz * v[0]);
+      i32 yp = (i32)(H / 2.0f - SCREEN_Z * iz * v[1]); // '-' Y is inverted
 
-      x = v1[0];
-      y = v1[1];
-      z = v1[2];
-
-      z += K2;
-
-      f32 iz = 1.0f / z;
-
-      i32 xp = (i32)(W / 2.0f + K1 * iz * x);
-      i32 yp = (i32)(H / 2.0f - K1 * iz * y);
-
+      // Check if projected point is in our screen buffer
       i32 idx = xp + yp * W;
-
-
       if (xp >= 0 && xp < W && yp >= 0 && yp < H) {
         if (iz > depth[idx]) {
-          depth[idx] = iz;
-          s_text[idx] = 'X';
+          // Torus normal, object space
+          f32 n[3] = {cos_theta * cos_phi, sin_theta, -cos_theta * sin_phi};
+          rot_v3_q4(n, n, q); // Rotated normal
+
+          // Shade N • L
+          f32 lum = MAX(DIFFUSE, dot_v3(n, L));
+
+          // Luminance to ASCII
+          i32 lum_idx = lum * (ARRAY_COUNT(s_luminance) - 1);
+
+          u8 c = s_luminance[lum_idx];
+
+          if (lum > -0.001f) {
+            depth[idx] = iz;
+            s_text[idx] = c;
+          }
         }
       }
     }
@@ -230,8 +256,7 @@ void start(void) {
   f32 print_dt_tsc    = tsc + 5.0f * cpu_timer_freq;
 
   // Donut
-  f32 turns1          = 0.0f;   // normalized [0; 1.0) in turns [0; 2pi)
-  f32 turns2          = 0.0f;   // normalized [0; 1.0) in turns [0; 2pi)
+  f32 turns           = 0.0f;   // normalized [0; 1.0) in turns [0; 2pi)
 
   while (1) {
     // dt bookkeeping
@@ -267,9 +292,8 @@ void start(void) {
       s_text[i] = ' ';
     }
 
-    turns1 = fmodf32(turns1 + 0.25f * dt, 1.0f);
-    turns2 = fmodf32(turns2 + 0.75f * dt, 1.0f); // rotate a but slower
-    donut(turns1, turns2);
+    turns = fmodf32(turns + 0.5f * dt, 1.0f);
+    donut(turns);
 
     // Draw
     glEnable(GL_BLEND);
