@@ -57,6 +57,8 @@ https://github.com/user-attachments/assets/d2f55f67-390f-4e15-8367-cb0785a34665
 Rotating torus rendered into char buffer.
 - Text buffer is rendered using bitmap font.
 
+https://github.com/user-attachments/assets/eb6680db-e154-4d95-948b-f7f1585dd28f
+
 ### Build all
 ```
 ./build.sh
