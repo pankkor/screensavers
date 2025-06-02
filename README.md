@@ -51,6 +51,12 @@ Bitmap font.
 
 https://github.com/user-attachments/assets/56f38c07-0ef0-4bfd-a538-c5e82ca7c3e9
 
+## ASCII Donut
+`src/donut.c`
+
+Rotating torus rendered into text buffer.
+- Text buffer is rendered using bitmap font.
+
 ### Build all
 ```
 ./build.sh
@@ -63,6 +69,7 @@ Binaries are located in `build` directory.
 ./build/wind
 ./build/lovers
 ./build/font
+./build/donut
 ```
 
 ### Files
