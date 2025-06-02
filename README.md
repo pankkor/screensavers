@@ -46,15 +46,15 @@ https://github.com/user-attachments/assets/745f3da5-ec2c-4ae3-abec-6852187c4f96
 `src/font.c`
 
 Bitmap font.
-- 16x16 characters ASCII R8 bitmap atlas.
+- 16x16 characters ASCII R8 bitmap tilemap.
 - ASCII frame animation.
 
-https://github.com/user-attachments/assets/56f38c07-0ef0-4bfd-a538-c5e82ca7c3e9
+https://github.com/user-attachments/assets/d2f55f67-390f-4e15-8367-cb0785a34665
 
 ## ASCII Donut
 `src/donut.c`
 
-Rotating torus rendered into text buffer.
+Rotating torus rendered into char buffer.
 - Text buffer is rendered using bitmap font.
 
 ### Build all
