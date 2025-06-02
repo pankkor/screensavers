@@ -119,12 +119,12 @@ static i64 cstr_len(const char *cstr) {
   return ret;
 }
 
-static void print_buf(i32 fd, const char *buf, i32 size) {
+FORCE_INLINE static void print_buf(i32 fd, const char *buf, i32 size) {
   syscall3(SYS_write, fd, (i64)buf, size);
 }
 
 // Print \0 terminated string
-static void print_cstr(i32 fd, const char *cstr) {
+FORCE_INLINE static void print_cstr(i32 fd, const char *cstr) {
   if (cstr) {
     i64 size = cstr_len(cstr);
     syscall3(SYS_write, fd, (i64)cstr, size);
@@ -273,6 +273,10 @@ FORCE_INLINE static void print_avg_dt_fps(f32 avg_dt) {
   print_cstr(STDOUT, "ms (");
   print_i64(STDOUT, (u64)(avg_dt * 1e6));
   print_cstr(STDOUT, "us)\n");
+}
+
+FORCE_INLINE static void print_ln(i32 fd) {
+  print_buf(fd, "\n", 1);
 }
 
 // --------------------------------------
@@ -438,35 +442,24 @@ FORCE_INLINE static f32 len_v4(const f32 v[4]) {
 }
 
 FORCE_INLINE static void norm_v2(f32 inout[2]) {
-  f32 ret[2];
   f32 l = len_v2(inout);
-  ret[0] /= l;
-  ret[1] /= l;
-  inout[0] = ret[0]; inout[1] = ret[1];
+  inout[0] /= l;
+  inout[1] /= l;
 }
 
-/*
-  out[0] = ret[0]; out[1] = ret[1]; out[2] = ret[2]; out[3] = ret[3];
-*/
-
 FORCE_INLINE static void norm_v3(f32 inout[3]) {
-  f32 ret[3];
   f32 l = len_v3(inout);
-  ret[0] /= l;
-  ret[1] /= l;
-  ret[2] /= l;
-  *inout = *ret;
-  inout[0] = ret[0]; inout[1] = ret[1]; inout[2] = ret[2];
+  inout[0] /= l;
+  inout[1] /= l;
+  inout[2] /= l;
 }
 
 FORCE_INLINE static void norm_v4(f32 inout[4]) {
-  f32 ret[4];
   f32 l = len_v4(inout);
-  ret[0] /= l;
-  ret[1] /= l;
-  ret[2] /= l;
-  ret[3] /= l;
-  inout[0] = ret[0]; inout[1] = ret[1]; inout[2] = ret[2]; inout[3] = ret[3];
+  inout[0] /= l;
+  inout[1] /= l;
+  inout[2] /= l;
+  inout[3] /= l;
 }
 
 FORCE_INLINE static f32 dot_v2(const f32 v1[2], const f32 v2[2]) {
