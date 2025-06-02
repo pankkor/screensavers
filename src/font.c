@@ -225,7 +225,7 @@ void start(void) {
       for (i32 y = 3; y < TEXT_H; ++y) {
         f32 l = 0.25f * cosf32(bg_anim_t + 0.02f * x) + 0.25f;
         f32 k = 0.25f * sinf32(bg_anim_t + 0.02f * y) + 0.25f;
-        i32 idx = (l + k) * ARRAY_COUNT(s_luminance) - 1;
+        i32 idx = (l + k) * (ARRAY_COUNT(s_luminance) - 1);
         s_text[x + TEXT_W * y] = s_luminance[idx];
       }
     }
