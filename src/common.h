@@ -90,16 +90,100 @@ FORCE_INLINE static i64 syscall3(i64 sys_num, i64 a0, i64 a1, i64 a2) {
   return ret;
 }
 
+FORCE_INLINE static i64 syscall6(i64 sys_num, i64 a0, i64 a1, i64 a2, i64 a3, i64 a4, i64 a5) {
+  i64 ret;
+  __asm__ volatile (
+    "mov x16,     %[sys_num]\n"
+    "mov x0,      %[a0]\n"
+    "mov x1,      %[a1]\n"
+    "mov x2,      %[a2]\n"
+    "mov x3,      %[a3]\n"
+    "mov x4,      %[a4]\n"
+    "mov x5,      %[a5]\n"
+    "svc          0x80\n"
+    "mov %[ret],  x0\n"
+    : [ret] "=r" (ret)
+    : [sys_num] "r" (sys_num), [a0] "r" (a0), [a1] "r" (a1), [a2] "r" (a2), [a3] "r" (a3), [a4] "r" (a4), [a5] "r" (a5)
+    : "x16", "x0", "x1", "x2", "x3", "x4", "x5"
+  );
+  return ret;
+}
+
 // --------------------------------------
 // Syscalls
 // --------------------------------------
-#define SYS_exit        1
-#define SYS_write       4
+#define SYS_EXIT        1
+#define SYS_WRITE       4
+#define SYS_OPEN        5
+#define SYS_CLOSE       6
+#define SYS_MUNMAP      73
+#define SYS_MMAP        197
+#define SYS_FTRUNCATE   201
 
 // TODO EINTR
 FORCE_INLINE static NO_RETURN void exit(i32 ec) {
-  syscall1(SYS_exit, ec);
+  syscall1(SYS_EXIT, ec);
   __builtin_unreachable();
+}
+
+FORCE_INLINE static i64 sys_write(i32 fd, const void *buf, u64 size) {
+  return syscall3(SYS_WRITE, fd, (i64)buf, size);
+}
+
+
+FORCE_INLINE static i32 sys_open(const char *filepath, i32 flags, u16 mode) {
+  return syscall3(SYS_OPEN, (i64)filepath, flags, mode);
+}
+
+FORCE_INLINE static i32 sys_close(i32 fd) {
+  return syscall1(SYS_CLOSE, fd);
+}
+
+FORCE_INLINE static i32 sys_munmap(void *addr, u64 len) {
+  return syscall2(SYS_MUNMAP, (u64)addr, len);
+}
+
+FORCE_INLINE static void *sys_mmap(void *addr, u64 len, i32 prot, i32 flags, i32 fd, u64 offset) {
+  return (void *)syscall6(SYS_MMAP, (u64)addr, len, prot, flags, fd, offset);
+}
+
+FORCE_INLINE static i32 sys_ftruncate(i32 fd, u64 length) {
+  return syscall2(SYS_FTRUNCATE, fd, length);
+}
+
+// --------------------------------------
+// Virtual Memory
+// --------------------------------------
+#if 0
+#include <mach/vm_page_size.h>  // extern vm_page_size
+#define VM_PAGE_SIZE vm_page_size
+#else
+enum { OS_PAGE_SIZE = 16384 };
+#endif
+
+#define PROT_WRITE      0x02    /* [MC2] pages can be written */
+#define PROT_READ       0x01    /* [MC2] pages can be read */
+
+#define MAP_ANON        0x1000  /* allocated from memory, swap space */
+
+#define MAP_SHARED      0x0001  /* [MF|SHM] share changes */
+#define MAP_PRIVATE     0x0002  /* [MF|SHM] changes are private */
+
+u64 os_bytes_to_pages(u64 bytes) {
+  return (bytes + OS_PAGE_SIZE - 1) / OS_PAGE_SIZE;
+}
+
+void *os_alloc_pages(u64 page_count) {
+  void *m;
+  int flags = MAP_PRIVATE | MAP_ANON;
+  u64 size = page_count * OS_PAGE_SIZE;
+  m = sys_mmap(0, size, PROT_READ | PROT_WRITE, flags, -1, 0);
+  return m;
+}
+
+i64 os_free_pages(void *p, u64 page_count) {
+  u64 size = page_count * OS_PAGE_SIZE;
+  return sys_munmap(p, size);
 }
 
 // --------------------------------------
@@ -120,16 +204,16 @@ static i64 cstr_len(const char *cstr) {
 }
 
 FORCE_INLINE static void print_buf(i32 fd, const char *buf, i32 size) {
-  syscall3(SYS_write, fd, (i64)buf, size);
+  sys_write(fd, buf, size);
 }
 
 // Print \0 terminated string
 FORCE_INLINE static void print_cstr(i32 fd, const char *cstr) {
   if (cstr) {
     i64 size = cstr_len(cstr);
-    syscall3(SYS_write, fd, (i64)cstr, size);
+    sys_write(fd, cstr, size);
   } else {
-    syscall3(SYS_write, fd, (i64)"(null)", 6);
+    sys_write(fd, "(null)", 6);
   }
 }
 
@@ -144,7 +228,7 @@ static void print_u64x(i32 fd, u64 v) {
     buf[i + 2] = r > 9 ? r - 10 + 'a' : r + '0';
   }
 
-  syscall3(SYS_write, fd, (i64)buf, sizeof(buf) / sizeof(buf[0]));
+  sys_write(fd, buf, ARRAY_COUNT(buf));
 }
 
 // Helper
@@ -167,7 +251,7 @@ static void print_zero_neg_u64_(i32 fd, u64 v, i32 zero_precision, b32 is_neg) {
   if (is_neg) {
     *--buf_cur = '-';
   }
-  syscall3(SYS_write, fd, (i64)buf_cur, buf_end - buf_cur);
+  sys_write(fd, buf_cur, buf_end - buf_cur);
 }
 
 static void print_zero_i64(i32 fd, i64 v, i32 zero_precision) {
@@ -224,7 +308,7 @@ static void print_f32(i32 fd, f32 v) {
   }
 
   if (buf) {
-    syscall3(SYS_write, fd, (i64)buf, buf_size);
+    sys_write(fd, buf, buf_size);
   } else {
     // reset sign
     fu.u                &= 0x7FFFFFFF;
@@ -236,10 +320,10 @@ static void print_f32(i32 fd, f32 v) {
     i64 fraci           = frac * 1000.0f;     // 3 digits precision
 
     if (v < 0) {
-      syscall3(SYS_write, fd, (i64)"-", 1);
+      sys_write(fd, "-", 1);
     }
     print_u64(fd, integer);
-    syscall3(SYS_write, fd, (i64)".", 1);
+    sys_write(fd, ".", 1);
     print_zero_i64(fd, fraci, 3);             // 3 digits precision
   }
 }
