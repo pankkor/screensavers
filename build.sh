@@ -1,15 +1,40 @@
 #!/bin/sh
 
+cc_flags="$(cat compile_flags.txt)"
+
+help="
+Build script.
+
+Usage
+  build.sh [source...]
+
+Creates 'build' directory and builds only specified source paths.
+If no source paths are specified builds all targers in 'src/*.c' with
+build flags taken from 'compiler_flags.txt'.
+Build also embeds Info.plist into binaries. No signing is done so far.
+"
+
 die() {
   echo 'Error: ' "$@" >&2
   exit 1
 }
 
+case "$1" in
+  --help | -h)
+    echo "$help"
+    exit 0
+    ;;
+esac
+
+if [ $# -gt 0 ]; then
+  srcs="$@"
+else
+  srcs='src/*.c'
+fi
+
 mkdir -p build || die "failed to make 'build' directory!"
 
-cc_flags="$(cat compile_flags.txt)"
-
-for src in src/*.c; do
+for src in $srcs; do
   basename="${src##*/}"
   basename_wo_ext="${basename%.*}"
 
