@@ -6,12 +6,17 @@ help="
 Build script.
 
 Usage
-  build.sh [source...]
+  build.sh [options] [source...]
 
 Creates 'build' directory and builds only specified source paths.
 If no source paths are specified builds all targers in 'src/*.c' with
 build flags taken from 'compiler_flags.txt'.
 Build also embeds Info.plist into binaries. No signing is done so far.
+
+Options
+  --help,-h         This help.
+  --verbose,-v      Verbose build. Print build command.
+  --no-test         Don't run test at '/build/test'.
 "
 
 die() {
@@ -19,18 +24,35 @@ die() {
   exit 1
 }
 
-case "$1" in
-  --help | -h)
-    echo "$help"
-    exit 0
-    ;;
-esac
+verbose=0
+run_test=1
+srcs='src/*.c'
 
-if [ $# -gt 0 ]; then
-  srcs="$@"
-else
-  srcs='src/*.c'
-fi
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --help|-h)
+      echo "$help"
+      exit 0
+      ;;
+    --verbose|-v)
+      verbose=1
+      shift
+      ;;
+    --no-test)
+      run_test=0
+      shift
+      ;;
+    -*)
+      echo "Error: unknown option '$1'"
+      echo "$help"
+      exit 1
+      ;;
+    *)
+      srcs="$@"
+      shift $#
+      ;;
+  esac
+done
 
 mkdir -p build || die "failed to make 'build' directory!"
 
@@ -67,10 +89,17 @@ EOF
   # Build macOS aarch64 OpenGL
   build_cmd="clang -o $out $src $embed_info_plist_flags $cc_flags"
 
-  echo "Building '$src' -> '$out'"
-  echo "$build_cmd"
-  echo ""
+  echo "Building '$src' -> '$out'..."
+  if [ $verbose -eq 1 ]; then
+    echo "$build_cmd"
+    echo ""
+  fi
 
   $build_cmd || die "failed to build '$src'!"
 
 done
+
+if [ $run_test -eq 1 -a -f ./build/test ]; then
+  echo "Running 'build/test'..."
+  ./build/test
+fi

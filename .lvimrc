@@ -5,4 +5,4 @@ set list
 
 let &l:makeprg="cd ".g:localvimrc_script_dir_unresolved." && ./build.sh"
 
-nnoremap <F2> :make <C-R>=expand("%")<CR><CR>:!./build/<C-R>=expand("%:t:r")<CR><CR>
+nnoremap <F2> :make --no-test <C-R>=expand("%")<CR><CR>:!./build/<C-R>=expand("%:t:r")<CR><CR>
