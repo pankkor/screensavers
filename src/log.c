@@ -20,7 +20,9 @@ enum {
 };
 
 u8 *s_l_buf;
-u16 s_atomic_line;
+u16 s_l_atomic_line;
+f32 s_l_tsc_ifreq;
+u64 s_l_start_tsc;
 
 #define O_CREAT         0x00000200      /* create if nonexistant */
 #define O_RDONLY        0x0000          /* open for reading only */
@@ -35,41 +37,94 @@ void l_init(const char *filepath) {
     EXPECT(p >= (void *)p, "Log: mmap file failed");
     s_l_buf = p;
   }
+
+  s_l_tsc_ifreq = 1.0f / read_cpu_timer_freq();
+  s_l_start_tsc = read_cpu_timer();
 }
 
 void l_shutdown(void) {
   EXPECT(sys_munmap(s_l_buf, L_BYTES) > 0, "Log: shutdown failed");
 }
 
-void l_log(const char* m) {
-  // TODO atomic
-  s_atomic_line = (s_atomic_line + 1) & 0x1FF;
-  // TODO ineficcient
-  i32 len = MIN(cstr_len(m), L_LINE_BYTES);
-  u8 *line = s_l_buf + s_atomic_line * L_LINE_BYTES;
+/* void l_log(const char* m) { */
+/*   s_l_atomic_line = (s_l_atomic_line + 1) & 0x1FF; */
+/*  */
+/*   // sss.uuuuuu| */
+/*   i32 reload_count = 1; */
+/*   i32 time_since_start=123456789; */
+/*   // const char *file = __FILE__; */
+/*   char file[16] = __FILE__; */
+/*   i32 ln_number = 3; */
+/*   i32 v=0xd3adbeef; */
+/*  */
+/*   u64 tsc = read_cpu_timer() - s_l_start_tsc; */
+/*   f32 sec = tsc * s_l_tsc_ifreq; */
+/*  */
+/*   // IO */
+/*   u8 *dst = s_l_buf + s_l_atomic_line * L_LINE_BYTES; */
+/*   // sec.us */
+/*   u32_to_a10(dst, v); */
+/*   u32_to_a8x(dst, v); */
+/*   u32_to_a8x(dst, v); */
+/*  */
+/*   u32_to_a8x(dst, v); */
+/*   dst[8] = '|'; */
+/*  */
+/*   // TODO ineficcient */
+/*   i32 i = 9; */
+/*  */
+/*   i32 r = MIN(i + cstr_len(m), L_LINE_BYTES); */
+/*  */
+/*   for (; i < r; ++i) { */
+/*     dst[i] = m[i]; */
+/*   } */
+/*   for (; i < L_LINE_BYTES - 1; ++i) { */
+/*     dst[i] = '_'; */
+/*   } */
+/*   dst[L_LINE_BYTES - 1] = '\n'; */
+/*  */
+/*   // Grab the line */
+/*   // TODO atomic */
+/*   // s_l_atomic_line = (s_l_atomic_line + 1) & 0x1FF; */
+/*  */
+/*   [> for (i32 i = 0; i < L_LINE_BYTES / 8; i += 8) { <] */
+/*   [>   dst[i] = line[i]; <] */
+/*   [> } <] */
+/* } */
 
-  i32 i = 0;
-  for (; i < len; ++i) {
-    line[i] = m[i];
-  }
-  for (; i < L_LINE_BYTES - 1; ++i) {
-    line[i] = ' ';
-  }
-  line[L_LINE_BYTES - 1] = '\n';
-}
-
-// --------------------------------------
-// Entry point (aka main)
-// --------------------------------------
 void start(void) {
+  {
+  u8 buf[12]; buf[11] = '\n';
+  i32_to_a11(buf, 2147483647);
+  print_buf(STDOUT, (const char *)buf, ARRAY_COUNT(buf));
+
+  /* i32_to_a11(buf, abs32(-2147483647)); */
+  u32_to_a10(buf, absi32(-2147483648));
+  print_buf(STDOUT, (const char *)buf, ARRAY_COUNT(buf));
+  }
+
+  {
+  u8 buf[21]; buf[20] = '\n';
+  i64_to_a20_fmt_right(buf, 9223372036854775807, '_');
+  print_buf(STDOUT, (const char *)buf, ARRAY_COUNT(buf));
+
+  i32 x3 = -2147483648;
+  (void)x3;
+
+  i64_to_a20_fmt_right(buf, I64_MIN, '_');
+  /* i64_to_a20_fmt_right(buf, -1234567, '_'); */
+  /* u64_to_a20_fmt_right(buf, 0xFFFFFFFFFFFFFFFF, '_'); */
+  /* print_buf(STDOUT, (const char *)buf, ARRAY_COUNT(buf)); */
+  }
+
   print_cstr(STDOUT, "\n\n");
+  exit(1);
   print_cstr(STDOUT, "<Press Ctrl+C to exit>\n");
 
   l_init("log.log");
   while (1) {
-    l_log("hello!");
+  /*   l_log("hello!"); */
   }
-
   l_shutdown();
   exit(0);
 }

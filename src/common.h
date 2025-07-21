@@ -1,5 +1,9 @@
 // Common include
 
+
+// TODO
+// - abs neon vabsd_s64
+
 // --------------------------------------
 // Types
 // --------------------------------------
@@ -15,7 +19,12 @@ typedef float               f32;
 typedef double              f64;
 typedef i32                 b32;
 
-#define U64_MAX             -1UL
+#define I32_MAX             (2147483647)
+#define I32_MIN             (-(2147483647)-1)
+#define U32_MAX             (-1u)
+#define I64_MAX             (9223372036854775807ll)
+#define I64_MIN             (-(9223372036854775807ll)-1)
+#define U64_MAX             (-1ull)
 
 #define FORCE_INLINE        inline __attribute__((always_inline))
 #define NO_RETURN           __attribute__((noreturn))
@@ -41,6 +50,13 @@ typedef i32                 b32;
     __typeof__(b) b_ = (b);                                                    \
     a_ <= b_ ? a_ : b_;                                                        \
 })
+
+// Include std headers after all common macroses defined
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#else
+#error Unsupported architecture
+#endif
 
 // --------------------------------------
 // syscall
@@ -97,7 +113,7 @@ FORCE_INLINE static i64 syscall6(i64 sys_num, i64 a0, i64 a1, i64 a2, i64 a3, i6
     "mov x0,      %[a0]\n"
     "mov x1,      %[a1]\n"
     "mov x2,      %[a2]\n"
-    "mov x3,      %[a3]\n"
+  "mov x3,      %[a3]\n"
     "mov x4,      %[a4]\n"
     "mov x5,      %[a5]\n"
     "svc          0x80\n"
@@ -130,7 +146,6 @@ FORCE_INLINE static i64 sys_write(i32 fd, const void *buf, u64 size) {
   return syscall3(SYS_WRITE, fd, (i64)buf, size);
 }
 
-
 FORCE_INLINE static i32 sys_open(const char *filepath, i32 flags, u16 mode) {
   return syscall3(SYS_OPEN, (i64)filepath, flags, mode);
 }
@@ -156,7 +171,7 @@ FORCE_INLINE static i32 sys_ftruncate(i32 fd, u64 length) {
 // --------------------------------------
 #if 0
 #include <mach/vm_page_size.h>  // extern vm_page_size
-#define VM_PAGE_SIZE vm_page_size
+#define OS_PAGE_SIZE vm_page_size
 #else
 enum { OS_PAGE_SIZE = 16384 };
 #endif
@@ -187,183 +202,6 @@ i64 os_free_pages(void *p, u64 page_count) {
 }
 
 // --------------------------------------
-// Print
-// --------------------------------------
-#define STDIN           0
-#define STDOUT          1
-#define STDERR          2
-
-static i64 cstr_len(const char *cstr) {
-  i64 ret = 0;
-  if (cstr) {
-    while (*cstr++) {
-      ++ret;
-    }
-  }
-  return ret;
-}
-
-FORCE_INLINE static void print_buf(i32 fd, const char *buf, i32 size) {
-  sys_write(fd, buf, size);
-}
-
-// Print \0 terminated string
-FORCE_INLINE static void print_cstr(i32 fd, const char *cstr) {
-  if (cstr) {
-    i64 size = cstr_len(cstr);
-    sys_write(fd, cstr, size);
-  } else {
-    sys_write(fd, "(null)", 6);
-  }
-}
-
-// Print hex representation of u64
-static void print_u64x(i32 fd, u64 v) {
-  u8 buf[18];
-  buf[0] = '0';
-  buf[1] = 'x';
-
-  for (i32 i = 0; i < 16; ++i) {
-    u8 r = (v >> ((15 - i) << 2)) & 0xf;
-    buf[i + 2] = r > 9 ? r - 10 + 'a' : r + '0';
-  }
-
-  sys_write(fd, buf, ARRAY_COUNT(buf));
-}
-
-// Helper
-static void print_zero_neg_u64_(i32 fd, u64 v, i32 zero_precision, b32 is_neg) {
-  u8 buf[21]; // sign (1 char) + 2^64(20 chars)
-
-  u8 *buf_end = buf + sizeof(buf) / sizeof(buf[0]);
-  u8 *buf_cur = buf_end;
-  do {
-    i64 r = v % 10;
-    *--buf_cur = r + '0';
-    v = v / 10;
-  } while (v);
-
-  i32 buf_size = buf_end - buf_cur;
-  for (int i = buf_size, size = MIN(20, zero_precision); i < size; ++i) {
-    *--buf_cur = '0';
-  }
-
-  if (is_neg) {
-    *--buf_cur = '-';
-  }
-  sys_write(fd, buf_cur, buf_end - buf_cur);
-}
-
-static void print_zero_i64(i32 fd, i64 v, i32 zero_precision) {
-  b32 is_neg = 0;
-  if (v < 0) {
-    is_neg = 1;
-    v = -v;
-  }
-  print_zero_neg_u64_(fd, v, zero_precision, is_neg);
-}
-
-static void print_zero_u64(i32 fd, u64 v, i32 zero_precision) {
-  print_zero_neg_u64_(fd, v, zero_precision, 0);
-}
-
-static void print_i64(i32 fd, i64 v) {
-  print_zero_i64(fd, v, 0);
-}
-
-static void print_u64(i32 fd, u64 v) {
-  print_zero_u64(fd, v, 0);
-}
-
-static void print_f32(i32 fd, f32 v) {
-  const char *buf = 0;
-  u8 buf_size;
-
-  union f32u32 {
-    f32 f;
-    u32 u;
-  };
-
-  union f32u32 fu = {.f = v};
-
-  // IEEE-754: 1 bit sign, 8 bits exponent, 23 bits mantissa
-  u32 exp = (fu.u & 0x7F800000) >> 23;
-  u32 man = (fu.u & 0x007FFFFF);
-
-  if (fu.u == 0x0) {
-    buf = "0.0";
-    buf_size = 3;
-  } else if (fu.u == 0x80000000) {
-    buf = "-0.0";
-    buf_size = 4;
-  } else if (fu.u == 0x7F800000) {
-    buf = "INF";
-    buf_size = 3;
-  } else if (fu.u == 0xFF800000) {
-    buf = "-INF";
-    buf_size = 4;
-  } else if (exp == 0xFF && man != 0) {
-    buf = "NAN";
-    buf_size = 3;
-  }
-
-  if (buf) {
-    sys_write(fd, buf, buf_size);
-  } else {
-    // reset sign
-    fu.u                &= 0x7FFFFFFF;
-
-    // TODO: well, that's wrong for floats that don't fit into u64 :)
-    u64 integer         = (u64)fu.f;
-
-    f32 frac            = fu.f - integer;
-    i64 fraci           = frac * 1000.0f;     // 3 digits precision
-
-    if (v < 0) {
-      sys_write(fd, "-", 1);
-    }
-    print_u64(fd, integer);
-    sys_write(fd, ".", 1);
-    print_zero_i64(fd, fraci, 3);             // 3 digits precision
-  }
-}
-
-static void print_f32s(i32 fd, i32 size, f32 arr[size]) {
-  if (size > 0) {
-    print_cstr(fd, "{");
-    print_f32(fd, arr[0]);
-    for (i32 i = 1; i < size; ++i) {
-      print_cstr(fd, ", ");
-      print_f32(fd, arr[i]);
-    }
-    print_cstr(fd, "}");
-  }
-}
-
-FORCE_INLINE static void print_v3(i32 fd, f32 v[3]) {
-  print_f32s(fd, 3, v);
-}
-
-FORCE_INLINE static void print_v4(i32 fd, f32 v[4]) {
-  print_f32s(fd, 4, v);
-}
-
-// Print average FPS and Delta time
-FORCE_INLINE static void print_avg_dt_fps(f32 avg_dt) {
-  print_cstr(STDOUT, "Average fps: ");
-  print_i64(STDOUT, (u64)(1.0f / avg_dt));
-  print_cstr(STDOUT, ", dt: ");
-  print_i64(STDOUT, (u64)(avg_dt * 1e3));
-  print_cstr(STDOUT, "ms (");
-  print_i64(STDOUT, (u64)(avg_dt * 1e6));
-  print_cstr(STDOUT, "us)\n");
-}
-
-FORCE_INLINE static void print_ln(i32 fd) {
-  print_buf(fd, "\n", 1);
-}
-
-// --------------------------------------
 // Helper
 // --------------------------------------
 FORCE_INLINE static b32 is_bit_set(i32 flags, i32 bit) {
@@ -387,47 +225,6 @@ FORCE_INLINE static u64 read_cpu_timer(void) {
 }
 
 // --------------------------------------
-// Expect/Assert
-// --------------------------------------
-FORCE_INLINE static void debugbreak(void) {
-#if defined(_MSC_VER)
-    __debugbreak();
-#elif defined(__clang__)
-    __builtin_debugtrap();
-#else
-    // gcc doesn't have __builtin_debugtrap equivalent
-    // Beware:
-    // __builtin_trap generates SIGILL and code after it will be optmized away.
-    __builtin_trap();
-#endif
-}
-
-#define STR1(s) # s
-#define STR(s) STR1(s)
-
-// EXPECT() behaves like Debug + Release assert
-#define EXPECT(condition, msg) expect_msg(!!(condition), \
-    __FILE__ ":" STR(__LINE__) ": Fatal:   (" STR(condition) ") == 0\n"\
-    msg "\n")
-
-FORCE_INLINE static void expect_msg(i32 condition, const char *msg) {
-  if (!condition) {
-    print_cstr(STDERR, msg);
-    debugbreak();
-  }
-}
-
-#define WARN_IF(condition, msg) warn_if_msg(!!(condition), \
-    __FILE__ ":" STR(__LINE__) ": Warning: (" STR(condition) ") == 0\n"\
-    msg "\n")
-
-FORCE_INLINE static void warn_if_msg(i32 condition, const char *msg) {
-  if (condition) {
-    print_cstr(STDERR, msg);
-  }
-}
-
-// --------------------------------------
 // Rand
 // --------------------------------------
 // TODO: this doesn't seem to be a good random
@@ -446,6 +243,20 @@ FORCE_INLINE static u64 xorshift64(struct xorshift64_state *state) {
 // --------------------------------------
 // Math
 // --------------------------------------
+FORCE_INLINE static u32 absi32(i32 v) {
+  u32 t = v >> 31;
+  v ^= t;
+  v += t & 1;
+  return v;
+}
+
+FORCE_INLINE static u64 absi64(i64 v) {
+  u64 t = v >> 63;
+  v ^= t;
+  v += t & 1;
+  return v;
+}
+
 FORCE_INLINE static f32 clampf32(f32 v, f32 lo, f32 hi) {
   return v > hi ? hi : v < lo ? lo : v;
 }
@@ -498,7 +309,7 @@ f32 sinf32(f32 turns) {
   f32 x = turns * 2.0f; // half turns
   x = fmodf32(x + 1.0f, 2.0f) - 1.0f; // to [-1; 1] half turns
 
-  f32 x2 = x * x;
+  f32 x2  = x * x;
   f32 p11 =              0.000385937753182769f; // x^11
   f32 p9  = p11 * x2 +  -0.006860187425683514f; // x^9
   f32 p7  = p9  * x2 +   0.0751872634325299f;   // x^7
@@ -630,6 +441,458 @@ void rot_v3_q4(f32 out[3], const f32 v[3], const f32 q[4]) {
   ret[2] = k1 * q[2] + k2 * v[2] + k3 * cross[2];
   out[0] = ret[0]; out[1] = ret[1]; out[2] = ret[2];
 }
+
+// --------------------------------------
+// Number to char array
+// --------------------------------------
+const u8 s_hex[16] = "0123456789ABCDEF";
+
+// Write u64 to buffer[16] as Hex.
+// Buffer has to be at least 16 bytes long
+FORCE_INLINE static void u64_to_a16x(u8 out[16], u64 v) {
+  out[ 0] = s_hex[(v >> 60) & 0xF];
+  out[ 1] = s_hex[(v >> 56) & 0xF];
+  out[ 2] = s_hex[(v >> 52) & 0xF];
+  out[ 3] = s_hex[(v >> 48) & 0xF];
+  out[ 4] = s_hex[(v >> 44) & 0xF];
+  out[ 5] = s_hex[(v >> 40) & 0xF];
+  out[ 6] = s_hex[(v >> 36) & 0xF];
+  out[ 7] = s_hex[(v >> 32) & 0xF];
+  out[ 8] = s_hex[(v >> 28) & 0xF];
+  out[ 9] = s_hex[(v >> 24) & 0xF];
+  out[10] = s_hex[(v >> 20) & 0xF];
+  out[11] = s_hex[(v >> 16) & 0xF];
+  out[12] = s_hex[(v >> 12) & 0xF];
+  out[13] = s_hex[(v >>  8) & 0xF];
+  out[14] = s_hex[(v >>  4) & 0xF];
+  out[15] = s_hex[(v >>  0) & 0xF];
+}
+
+// Write u32 to buffer[8] as Hex.
+// Buffer has to be at least 8 bytes long
+FORCE_INLINE static void u32_to_a8x(u8 out[8], u32 v) {
+  out[0]  = s_hex[(v >> 28) & 0xF];
+  out[1]  = s_hex[(v >> 24) & 0xF];
+  out[2]  = s_hex[(v >> 20) & 0xF];
+  out[3]  = s_hex[(v >> 16) & 0xF];
+  out[4]  = s_hex[(v >> 12) & 0xF];
+  out[5]  = s_hex[(v >>  8) & 0xF];
+  out[6]  = s_hex[(v >>  4) & 0xF];
+  out[7]  = s_hex[(v >>  0) & 0xF];
+}
+
+FORCE_INLINE static i32 u64_to_a1d_(u8 *out, u64 u) {
+  u64 q = u / 10;
+  u64 r = u - q * 10;
+  out[0] = '0' + r;
+  return q;
+}
+
+FORCE_INLINE static i32 u32_to_a1d_(u8 *out, u32 u) {
+  u32 q = u / 10;
+  u32 r = u - q * 10;
+  out[0] = '0' + r;
+  return q;
+}
+
+// Write u64 to buffer[20]
+FORCE_INLINE static void u64_to_a20(u8 out[20], u64 u) {
+  u = u32_to_a1d_(out + 19, u);
+  u = u32_to_a1d_(out + 18, u);
+  u = u32_to_a1d_(out + 17, u);
+  u = u32_to_a1d_(out + 16, u);
+  u = u32_to_a1d_(out + 15, u);
+  u = u32_to_a1d_(out + 14, u);
+  u = u32_to_a1d_(out + 13, u);
+  u = u32_to_a1d_(out + 12, u);
+  u = u32_to_a1d_(out + 11, u);
+  u = u32_to_a1d_(out + 10, u);
+  u = u32_to_a1d_(out +  9, u);
+  u = u32_to_a1d_(out +  8, u);
+  u = u32_to_a1d_(out +  7, u);
+  u = u32_to_a1d_(out +  6, u);
+  u = u32_to_a1d_(out +  5, u);
+  u = u32_to_a1d_(out +  4, u);
+  u = u32_to_a1d_(out +  3, u);
+  u = u32_to_a1d_(out +  2, u);
+  u = u32_to_a1d_(out +  1, u);
+  u = u32_to_a1d_(out +  0, u);
+}
+
+// Write u32 to buffer[10]
+FORCE_INLINE static void u32_to_a10(u8 out[10], u32 u) {
+  u = u32_to_a1d_(out +  9, u);
+  u = u32_to_a1d_(out +  8, u);
+  u = u32_to_a1d_(out +  7, u);
+  u = u32_to_a1d_(out +  6, u);
+  u = u32_to_a1d_(out +  5, u);
+  u = u32_to_a1d_(out +  4, u);
+  u = u32_to_a1d_(out +  3, u);
+  u = u32_to_a1d_(out +  2, u);
+  u = u32_to_a1d_(out +  1, u);
+  u = u32_to_a1d_(out +  0, u);
+}
+
+// Write i64 to buffer[20] with sign at buffer[0].
+// i=-1234 -> "-0000000000000001234"
+FORCE_INLINE static void i64_to_a20(u8 out[20], i64 i) {
+  out[0] = '+' + (('-' - '+') & (i >> 63));
+  u64 u = absi64(i);
+  u = u32_to_a1d_(out + 19, u);
+  u = u32_to_a1d_(out + 18, u);
+  u = u32_to_a1d_(out + 17, u);
+  u = u32_to_a1d_(out + 16, u);
+  u = u32_to_a1d_(out + 15, u);
+  u = u32_to_a1d_(out + 14, u);
+  u = u32_to_a1d_(out + 13, u);
+  u = u32_to_a1d_(out + 12, u);
+  u = u32_to_a1d_(out + 11, u);
+  u = u32_to_a1d_(out + 10, u);
+  u = u32_to_a1d_(out +  9, u);
+  u = u32_to_a1d_(out +  8, u);
+  u = u32_to_a1d_(out +  7, u);
+  u = u32_to_a1d_(out +  6, u);
+  u = u32_to_a1d_(out +  5, u);
+  u = u32_to_a1d_(out +  4, u);
+  u = u32_to_a1d_(out +  3, u);
+  u = u32_to_a1d_(out +  2, u);
+  u = u32_to_a1d_(out +  1, u);
+}
+
+// Write i32 to buffer[11] with sign at buffer[0].
+// i=-1234 -> "-0000001234"
+FORCE_INLINE static void i32_to_a11(u8 out[11], i32 i) {
+  out[0] = '+' + (('-' - '+') & (i >> 31));
+  u32 u = absi32(i);
+  u32_to_a10(out + 1, u);
+}
+
+// Substitute leading zeroes.
+// u=00001234, c='_') -> "____1234"
+//                            ^
+// Returns pointer to the first not substituted character
+FORCE_INLINE static u8 *fmt_subs_leading_zeroes(u8 *inout, i32 size, u8 c) {
+  while(size > 0 && inout[0] == '0') {
+    inout[0] = c;
+    ++inout; --size;
+  }
+  return inout;
+}
+
+// Write i64 to buffer[21] padding right with all '0' substituted with `c`.
+// i=-1234, c='_' -> "_______________-1234"
+FORCE_INLINE static void i64_to_a20_fmt_right(u8 out[20], i64 i, u8 c) {
+  i64_to_a20(out, i);
+  u8 *next = fmt_subs_leading_zeroes(out + 1, 19, c);
+  SWAP(next[-1], out[0]);
+}
+
+// Write i32 to buffer[11] padding right with all '0' substituted with `c`.
+// i=-1234, c='_' -> "_______________-1234"
+FORCE_INLINE static void i32_to_a11_fmt_right(u8 out[11], i32 i, u8 c) {
+  i32_to_a11(out, i);
+  u8 *next = fmt_subs_leading_zeroes(out + 1, 10, c);
+  SWAP(next[-1], out[0]);
+}
+
+// Write i64 to buffer[21] padding right with all '0' substituted with `c`.
+// u=1234, c='_' -> "_______________1234"
+FORCE_INLINE static void u64_to_a20_fmt_right(u8 out[20], u64 u, u8 c) {
+  u64_to_a20(out, u);
+  fmt_subs_leading_zeroes(out, 20, c);
+}
+
+// Write i32 to buffer[11] padding right with all '0' substituted with `c`.
+// u=1234, c='_' -> "_______________1234"
+FORCE_INLINE static void u32_to_a10_fmt_right(u8 out[10], u32 u, u8 c) {
+  u32_to_a10(out, u);
+  fmt_subs_leading_zeroes(out, 10, c);
+}
+
+// --------------------------------------
+// Print
+// --------------------------------------
+#define STDIN           0
+#define STDOUT          1
+#define STDERR          2
+
+static i64 cstr_len(const char *cstr) {
+  i64 ret = 0;
+  if (cstr) {
+    while (*cstr++) {
+      ++ret;
+    }
+  }
+  return ret;
+}
+
+// Unaligned memory comparison
+static i32 is_umem_eq(u8 * restrict l, u8 * restrict r, i64 size) {
+  while (size >= 32) {
+    u8 b0 = *(u64 *)(l +  0) != *(u64 *)(r +  0);
+    u8 b1 = *(u64 *)(l +  8) != *(u64 *)(r +  8);
+    u8 b2 = *(u64 *)(l + 16) != *(u64 *)(r + 16);
+    u8 b3 = *(u64 *)(l + 24) != *(u64 *)(r + 24);
+    if (b0 | b1 | b2 | b3) { return 0; }
+    size -= 32; l += 32; r += 32;
+  }
+
+  if (size >= 24) {
+    u8 b0 = *(u64 *)(l +  0) != *(u64 *)(r +  0);
+    u8 b1 = *(u64 *)(l +  8) != *(u64 *)(r +  8);
+    u8 b2 = *(u64 *)(l + 16) != *(u64 *)(r + 16);
+    if (b0 | b1 | b2) { return 0; }
+    size -= 24; l += 24; r += 24;
+  } else if (size >= 16) {
+    u8 b0 = *(u64 *)(l +  0) != *(u64 *)(r +  0);
+    u8 b1 = *(u64 *)(l +  8) != *(u64 *)(r +  8);
+    if (b0 | b1) { return 0; }
+    size -= 16; l += 16; r += 16;
+  } else if (size >= 8) {
+    u8 b0 = *(u64 *)(l +  0) != *(u64 *)(r +  0);
+    if (b0) { return 0; }
+    size -= 8; l += 8; r += 8;
+  }
+
+  while (size > 0) {
+    u8 b0 = *l != *r ;
+    if (b0) { return 0; }
+    --size; ++l; ++r;
+  }
+
+  return 1;
+}
+
+// Aligned memory comparison
+static i32 is_amem_eq_neon(u8 * ALIGNED(16) restrict l,
+    u8 * ALIGNED(16) restrict r, i64 size) {
+  while (size >= 32) {
+    uint8x16x2_t vl = vld2q_u8(l);
+    uint8x16x2_t vr = vld2q_u8(r);
+    uint8x16_t m0 = vceqq_u8(vl.val[0], vr.val[0]);
+    uint8x16_t m1 = vceqq_u8(vl.val[1], vr.val[1]);
+    uint8_t min0 = vminvq_u8(m0);
+    uint8_t min1 = vminvq_u8(m1);
+
+    if (min0 != 0xFF || min1 != 0xFF) { return 0; }
+
+    size -= 32; l += 32; r += 32;
+  }
+    // vbslq_u8
+    //
+    // uint8x16_t m = vorrq_u8(m0, m1);
+    //
+    // uint8x16_t eq = vceqzq_u8(ne);
+  return 1;
+}
+
+FORCE_INLINE static i32 is_amem_eq(u8 * ALIGNED(16) restrict l,
+    u8 * ALIGNED(16) restrict r, i64 size) {
+  return is_umem_eq(l, r, size);
+  // TODO: make enable neon impl
+  // return is_amem_eq_neon(l, r, size);
+}
+
+FORCE_INLINE static void print_buf(i32 fd, const char *buf, i32 size) {
+  sys_write(fd, buf, size);
+}
+
+// Print \0 terminated string
+FORCE_INLINE static void print_cstr(i32 fd, const char *cstr) {
+  if (cstr) {
+    i64 size = cstr_len(cstr);
+    sys_write(fd, cstr, size);
+  } else {
+    sys_write(fd, "(null)", 6);
+  }
+}
+
+// Print hex representation of u64
+static void print_u64x(i32 fd, u64 v) {
+  u8 buf[18];
+  buf[0] = '0';
+  buf[1] = 'x';
+  u64_to_a16x(buf + 2, v);
+  sys_write(fd, buf, ARRAY_COUNT(buf));
+}
+
+// Helper
+static void print_zero_neg_u64_(i32 fd, u64 v, i32 zero_precision, b32 is_neg) {
+  u8 buf[21]; // sign (1 char) + 2^64(20 chars)
+
+  u8 *buf_end = buf + sizeof(buf) / sizeof(buf[0]);
+  u8 *buf_cur = buf_end;
+  do {
+    i64 q = v / 10;
+    i64 r = v - q * 10;
+    *--buf_cur = r + '0';
+    v = q;
+  } while (v);
+
+  i32 buf_size = buf_end - buf_cur;
+  for (int i = buf_size, size = MIN(20, zero_precision); i < size; ++i) {
+    *--buf_cur = '0';
+  }
+
+  if (is_neg) {
+    *--buf_cur = '-';
+  }
+  sys_write(fd, buf_cur, buf_end - buf_cur);
+}
+
+static void print_zero_i64(i32 fd, i64 v, i32 zero_precision) {
+  b32 is_neg = 0;
+  if (v < 0) {
+    is_neg = 1;
+    v = -v;
+  }
+  print_zero_neg_u64_(fd, v, zero_precision, is_neg);
+}
+
+static void print_zero_u64(i32 fd, u64 v, i32 zero_precision) {
+  print_zero_neg_u64_(fd, v, zero_precision, 0);
+}
+
+static void print_i64(i32 fd, i64 v) {
+  print_zero_i64(fd, v, 0);
+}
+
+static void print_u64(i32 fd, u64 v) {
+  print_zero_u64(fd, v, 0);
+}
+
+static void print_f32(i32 fd, f32 v) {
+  const char *buf = 0;
+  u8 buf_size;
+
+  union f32u32 {
+    f32 f;
+    u32 u;
+  };
+
+  union f32u32 fu = {.f = v};
+
+  // IEEE-754: 1 bit sign, 8 bits exponent, 23 bits mantissa
+  u32 exp = (fu.u & 0x7F800000) >> 23;
+  u32 man = (fu.u & 0x007FFFFF);
+
+  if (fu.u == 0x0) {
+    buf = "0.0";
+    buf_size = 3;
+  } else if (fu.u == 0x80000000) {
+    buf = "-0.0";
+    buf_size = 4;
+  } else if (fu.u == 0x7F800000) {
+    buf = "INF";
+    buf_size = 3;
+  } else if (fu.u == 0xFF800000) {
+    buf = "-INF";
+    buf_size = 4;
+  } else if (exp == 0xFF && man != 0) {
+    buf = "NAN";
+    buf_size = 3;
+  }
+
+  if (buf) {
+    sys_write(fd, buf, buf_size);
+  } else {
+    // reset sign
+    fu.u                &= 0x7FFFFFFF;
+
+    // TODO: well, that's wrong for floats that don't fit into u64 :)
+    u64 integer         = (u64)fu.f;
+
+    f32 frac            = fu.f - integer;
+    i64 fraci           = frac * 1000.0f;     // 3 digits precision
+
+    if (v < 0) {
+      sys_write(fd, "-", 1);
+    }
+    print_u64(fd, integer);
+    sys_write(fd, ".", 1);
+    print_zero_i64(fd, fraci, 3);             // 3 digits precision
+  }
+}
+
+static void print_f32s(i32 fd, i32 size, f32 arr[size]) {
+  if (size > 0) {
+    print_cstr(fd, "{");
+    print_f32(fd, arr[0]);
+    for (i32 i = 1; i < size; ++i) {
+      print_cstr(fd, ", ");
+      print_f32(fd, arr[i]);
+    }
+    print_cstr(fd, "}");
+  }
+}
+
+FORCE_INLINE static void print_v3(i32 fd, f32 v[3]) {
+  print_f32s(fd, 3, v);
+}
+
+FORCE_INLINE static void print_v4(i32 fd, f32 v[4]) {
+  print_f32s(fd, 4, v);
+}
+
+// Print average FPS and Delta time
+FORCE_INLINE static void print_avg_dt_fps(f32 avg_dt) {
+  print_cstr(STDOUT, "Average fps: ");
+  print_i64(STDOUT, (u64)(1.0f / avg_dt));
+  print_cstr(STDOUT, ", dt: ");
+  print_i64(STDOUT, (u64)(avg_dt * 1e3));
+  print_cstr(STDOUT, "ms (");
+  print_i64(STDOUT, (u64)(avg_dt * 1e6));
+  print_cstr(STDOUT, "us)\n");
+}
+
+FORCE_INLINE static void print_ln(i32 fd) {
+  print_buf(fd, "\n", 1);
+}
+
+// --------------------------------------
+// Expect/Assert
+// --------------------------------------
+FORCE_INLINE static void debugbreak(void) {
+#if defined(_MSC_VER)
+    __debugbreak();
+#elif defined(__clang__)
+    __builtin_debugtrap();
+#else
+    // gcc doesn't have __builtin_debugtrap equivalent
+    // Beware:
+    // __builtin_trap generates SIGILL and code after it will be optmized away.
+    __builtin_trap();
+#endif
+}
+
+#define STR1(s) # s
+#define STR(s) STR1(s)
+
+// EXPECT() behaves like Debug + Release assert
+#define EXPECT(condition, msg) expect_msg(!!(condition), \
+    __FILE__ ":" STR(__LINE__) ": Fatal:   (" STR(condition) ") == 0\n"\
+    msg "\n")
+
+FORCE_INLINE static void expect_msg(i32 condition, const char *msg) {
+  if (!condition) {
+    print_cstr(STDERR, msg);
+    debugbreak();
+  }
+}
+
+#define WARN_IF(condition, msg) warn_if_msg(!!(condition), \
+    __FILE__ ":" STR(__LINE__) ": Warning: (" STR(condition) ") == 0\n"\
+    msg "\n")
+
+FORCE_INLINE static void warn_if_msg(i32 condition, const char *msg) {
+  if (condition) {
+    print_cstr(STDERR, msg);
+  }
+}
+
+// TEST is EXPECT without message
+#define TEST_EXPECT(condition) expect_msg(!!(condition), \
+    __FILE__ ":" STR(__LINE__) ": Test failed: (" STR(condition) ") == 0\n")
 
 // --------------------------------------
 // nostdlib stubs
