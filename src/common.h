@@ -481,14 +481,14 @@ FORCE_INLINE static void u32_to_a8x(u8 out[8], u32 v) {
   out[7]  = s_hex[(v >>  0) & 0xF];
 }
 
-FORCE_INLINE static i32 u64_to_a1d_(u8 *out, u64 u) {
+FORCE_INLINE static u64 u64_to_a1d_(u8 *out, u64 u) {
   u64 q = u / 10;
   u64 r = u - q * 10;
   out[0] = '0' + r;
   return q;
 }
 
-FORCE_INLINE static i32 u32_to_a1d_(u8 *out, u32 u) {
+FORCE_INLINE static u32 u32_to_a1d_(u8 *out, u32 u) {
   u32 q = u / 10;
   u32 r = u - q * 10;
   out[0] = '0' + r;
@@ -497,26 +497,26 @@ FORCE_INLINE static i32 u32_to_a1d_(u8 *out, u32 u) {
 
 // Write u64 to buffer[20]
 FORCE_INLINE static void u64_to_a20(u8 out[20], u64 u) {
-  u = u32_to_a1d_(out + 19, u);
-  u = u32_to_a1d_(out + 18, u);
-  u = u32_to_a1d_(out + 17, u);
-  u = u32_to_a1d_(out + 16, u);
-  u = u32_to_a1d_(out + 15, u);
-  u = u32_to_a1d_(out + 14, u);
-  u = u32_to_a1d_(out + 13, u);
-  u = u32_to_a1d_(out + 12, u);
-  u = u32_to_a1d_(out + 11, u);
-  u = u32_to_a1d_(out + 10, u);
-  u = u32_to_a1d_(out +  9, u);
-  u = u32_to_a1d_(out +  8, u);
-  u = u32_to_a1d_(out +  7, u);
-  u = u32_to_a1d_(out +  6, u);
-  u = u32_to_a1d_(out +  5, u);
-  u = u32_to_a1d_(out +  4, u);
-  u = u32_to_a1d_(out +  3, u);
-  u = u32_to_a1d_(out +  2, u);
-  u = u32_to_a1d_(out +  1, u);
-  u = u32_to_a1d_(out +  0, u);
+  u = u64_to_a1d_(out + 19, u);
+  u = u64_to_a1d_(out + 18, u);
+  u = u64_to_a1d_(out + 17, u);
+  u = u64_to_a1d_(out + 16, u);
+  u = u64_to_a1d_(out + 15, u);
+  u = u64_to_a1d_(out + 14, u);
+  u = u64_to_a1d_(out + 13, u);
+  u = u64_to_a1d_(out + 12, u);
+  u = u64_to_a1d_(out + 11, u);
+  u = u64_to_a1d_(out + 10, u);
+  u = u64_to_a1d_(out +  9, u);
+  u = u64_to_a1d_(out +  8, u);
+  u = u64_to_a1d_(out +  7, u);
+  u = u64_to_a1d_(out +  6, u);
+  u = u64_to_a1d_(out +  5, u);
+  u = u64_to_a1d_(out +  4, u);
+  u = u64_to_a1d_(out +  3, u);
+  u = u64_to_a1d_(out +  2, u);
+  u = u64_to_a1d_(out +  1, u);
+  u = u64_to_a1d_(out +  0, u);
 }
 
 // Write u32 to buffer[10]
@@ -538,25 +538,25 @@ FORCE_INLINE static void u32_to_a10(u8 out[10], u32 u) {
 FORCE_INLINE static void i64_to_a20(u8 out[20], i64 i) {
   out[0] = '+' + (('-' - '+') & (i >> 63));
   u64 u = absi64(i);
-  u = u32_to_a1d_(out + 19, u);
-  u = u32_to_a1d_(out + 18, u);
-  u = u32_to_a1d_(out + 17, u);
-  u = u32_to_a1d_(out + 16, u);
-  u = u32_to_a1d_(out + 15, u);
-  u = u32_to_a1d_(out + 14, u);
-  u = u32_to_a1d_(out + 13, u);
-  u = u32_to_a1d_(out + 12, u);
-  u = u32_to_a1d_(out + 11, u);
-  u = u32_to_a1d_(out + 10, u);
-  u = u32_to_a1d_(out +  9, u);
-  u = u32_to_a1d_(out +  8, u);
-  u = u32_to_a1d_(out +  7, u);
-  u = u32_to_a1d_(out +  6, u);
-  u = u32_to_a1d_(out +  5, u);
-  u = u32_to_a1d_(out +  4, u);
-  u = u32_to_a1d_(out +  3, u);
-  u = u32_to_a1d_(out +  2, u);
-  u = u32_to_a1d_(out +  1, u);
+  u = u64_to_a1d_(out + 19, u);
+  u = u64_to_a1d_(out + 18, u);
+  u = u64_to_a1d_(out + 17, u);
+  u = u64_to_a1d_(out + 16, u);
+  u = u64_to_a1d_(out + 15, u);
+  u = u64_to_a1d_(out + 14, u);
+  u = u64_to_a1d_(out + 13, u);
+  u = u64_to_a1d_(out + 12, u);
+  u = u64_to_a1d_(out + 11, u);
+  u = u64_to_a1d_(out + 10, u);
+  u = u64_to_a1d_(out +  9, u);
+  u = u64_to_a1d_(out +  8, u);
+  u = u64_to_a1d_(out +  7, u);
+  u = u64_to_a1d_(out +  6, u);
+  u = u64_to_a1d_(out +  5, u);
+  u = u64_to_a1d_(out +  4, u);
+  u = u64_to_a1d_(out +  3, u);
+  u = u64_to_a1d_(out +  2, u);
+  u = u64_to_a1d_(out +  1, u);
 }
 
 // Write i32 to buffer[11] with sign at buffer[0].
@@ -583,7 +583,7 @@ FORCE_INLINE static u8 *fmt_subs_leading_zeroes(u8 *inout, i32 size, u8 c) {
 // i=-1234, c='_' -> "_______________-1234"
 FORCE_INLINE static void i64_to_a20_fmt_right(u8 out[20], i64 i, u8 c) {
   i64_to_a20(out, i);
-  u8 *next = fmt_subs_leading_zeroes(out + 1, 19, c);
+  u8 *next = fmt_subs_leading_zeroes(out + 1, 18, c);
   SWAP(next[-1], out[0]);
 }
 
@@ -591,7 +591,7 @@ FORCE_INLINE static void i64_to_a20_fmt_right(u8 out[20], i64 i, u8 c) {
 // i=-1234, c='_' -> "_______________-1234"
 FORCE_INLINE static void i32_to_a11_fmt_right(u8 out[11], i32 i, u8 c) {
   i32_to_a11(out, i);
-  u8 *next = fmt_subs_leading_zeroes(out + 1, 10, c);
+  u8 *next = fmt_subs_leading_zeroes(out + 1, 9, c);
   SWAP(next[-1], out[0]);
 }
 
@@ -599,14 +599,14 @@ FORCE_INLINE static void i32_to_a11_fmt_right(u8 out[11], i32 i, u8 c) {
 // u=1234, c='_' -> "_______________1234"
 FORCE_INLINE static void u64_to_a20_fmt_right(u8 out[20], u64 u, u8 c) {
   u64_to_a20(out, u);
-  fmt_subs_leading_zeroes(out, 20, c);
+  fmt_subs_leading_zeroes(out, 19, c);
 }
 
 // Write i32 to buffer[11] padding right with all '0' substituted with `c`.
 // u=1234, c='_' -> "_______________1234"
 FORCE_INLINE static void u32_to_a10_fmt_right(u8 out[10], u32 u, u8 c) {
   u32_to_a10(out, u);
-  fmt_subs_leading_zeroes(out, 10, c);
+  fmt_subs_leading_zeroes(out, 9, c);
 }
 
 // --------------------------------------

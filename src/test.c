@@ -98,13 +98,28 @@ void test_helper(void) {
 }
 
 void test_x_to_a(void) {
+  // u32
   {
-    u8 expected[16] = "+2147483647XXXXX";
+    u8 expected[16] = "0000000000XXXXXX";
     u8 buf[16] = "XXXXXXXXXXXXXXXX";
-    i32_to_a11(buf, 2147483647);
+    u32_to_a10(buf, 0);
     TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
   }
 
+  {
+    u8 expected[16] = "0000000123XXXXXX";
+    u8 buf[16] = "XXXXXXXXXXXXXXXX";
+    u32_to_a10(buf, 123);
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[16] = "4294967295XXXXXX";
+    u8 buf[16] = "XXXXXXXXXXXXXXXX";
+    u32_to_a10(buf, 4294967295);
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+  // i32
   {
     u8 expected[16] = "+0000000000XXXXX";
     u8 buf[16] = "XXXXXXXXXXXXXXXX";
@@ -113,25 +128,185 @@ void test_x_to_a(void) {
   }
 
   {
-    u8 expected[16] = "+0000000001XXXXX";
+    u8 expected[16] = "+0000000123XXXXX";
     u8 buf[16] = "XXXXXXXXXXXXXXXX";
-    i32_to_a11(buf, 1);
+    i32_to_a11(buf, 123);
     TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
   }
 
   {
-    u8 expected[16] = "2147483648XXXXXX";
+    u8 expected[16] = "-0000000123XXXXX";
     u8 buf[16] = "XXXXXXXXXXXXXXXX";
-    u32_to_a10(buf, absi32(-2147483648));
+    i32_to_a11(buf, -123);
     TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
   }
 
   {
-    // TODO: fixme
-    u8 buf[21]; buf[20] = '\n';
+    u8 expected[16] = "+2147483647XXXXX";
+    u8 buf[16] = "XXXXXXXXXXXXXXXX";
+    i32_to_a11(buf, 2147483647);
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[16] = "-2147483648XXXXX";
+    u8 buf[16] = "XXXXXXXXXXXXXXXX";
+    i32_to_a11(buf, -2147483648);
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+  // u64
+  {
+    u8 expected[32] = "00000000000000000000XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    u64_to_a20(buf, 0);
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[32] = "00000000000000000123XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    u64_to_a20(buf, 123);
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[32] = "09223372036854775807XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    u64_to_a20(buf, 9223372036854775807);
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[32] = "18446744073709551615XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    u64_to_a20(buf, 18446744073709551615ull);
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+  // i64
+  {
+    u8 expected[32] = "+0000000000000000000XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    i64_to_a20(buf, 0);
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[32] = "+0000000000000000123XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    i64_to_a20(buf, 123);
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[32] = "+9223372036854775807XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    i64_to_a20(buf, 9223372036854775807);
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+  // u32 fmt
+  {
+    u8 expected[16] = "_________0XXXXXX";
+    u8 buf[16] = "XXXXXXXXXXXXXXXX";
+    u32_to_a10_fmt_right(buf, 0, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[16] = "_______123XXXXXX";
+    u8 buf[16] = "XXXXXXXXXXXXXXXX";
+    u32_to_a10_fmt_right(buf, 123, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[16] = "4294967295XXXXXX";
+    u8 buf[16] = "XXXXXXXXXXXXXXXX";
+    u32_to_a10_fmt_right(buf, 4294967295, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+  // i32 fmt
+  {
+    u8 expected[16] = "_________+0XXXXX";
+    u8 buf[16] = "XXXXXXXXXXXXXXXX";
+    i32_to_a11_fmt_right(buf, 0, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[16] = "_______+123XXXXX";
+    u8 buf[16] = "XXXXXXXXXXXXXXXX";
+    i32_to_a11_fmt_right(buf, 123, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[16] = "_______-123XXXXX";
+    u8 buf[16] = "XXXXXXXXXXXXXXXX";
+    i32_to_a11_fmt_right(buf, -123, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[16] = "-2147483648XXXXX";
+    u8 buf[16] = "XXXXXXXXXXXXXXXX";
+    i32_to_a11_fmt_right(buf, -2147483648, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[16] = "+2147483647XXXXX";
+    u8 buf[16] = "XXXXXXXXXXXXXXXX";
+    i32_to_a11_fmt_right(buf, 2147483647, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+  // u64 fmt
+  {
+    u8 expected[32] = "___________________0XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    u64_to_a20_fmt_right(buf, 0, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[32] = "_________________123XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    u64_to_a20_fmt_right(buf, 123, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[32] = "_9223372036854775807XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    u64_to_a20_fmt_right(buf, 9223372036854775807, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[32] = "18446744073709551615XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    u64_to_a20_fmt_right(buf, 18446744073709551615ull, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+  // i64 fmt
+  {
+    u8 expected[32] = "__________________+0XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    i64_to_a20_fmt_right(buf, 0, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[32] = "________________+123XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    i64_to_a20_fmt_right(buf, 123, '_');
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
+  }
+
+  {
+    u8 expected[32] = "+9223372036854775807XXXXXXXXXXXX";
+    u8 buf[32] = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
     i64_to_a20_fmt_right(buf, 9223372036854775807, '_');
-    print_buf(STDOUT, (const char *)buf, ARRAY_COUNT(buf));
-    print_ln(STDOUT);
+    TEST_EXPECT(is_amem_eq(buf, expected, ARRAY_COUNT(buf)) == 1);
   }
 }
 
