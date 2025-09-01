@@ -9,6 +9,8 @@
 
 #include "common.h"
 
+#define ESC_DEL "\033[3~"
+
 void test_math(void) {
   TEST_EXPECT(absi32(2147483647) == 2147483647);
   TEST_EXPECT(absi32(12345678) == 12345678);
@@ -314,19 +316,17 @@ void test_x_to_a(void) {
 // Entry point (aka main)
 // --------------------------------------
 void start(void) {
-  print_cstr(STDOUT, "TEST MATH:                 ...\n");
+  print_cstr(STDOUT, "TESTING MATH          ...");
   test_math();
-  print_cstr(STDOUT, "TEST MATH:                  OK\n");
-  print_cstr(STDOUT, "------------------------------\n");
-  print_cstr(STDOUT, "TEST HELPER:               ...\n");
+  print_cstr(STDOUT, " OK\n");
+
+  print_cstr(STDOUT, "TESTING HELPER        ...");
   test_helper();
-  print_cstr(STDOUT, "TEST HELPER:                OK\n");
-  print_cstr(STDOUT, "------------------------------\n");
-  print_cstr(STDOUT, "TEST X to A:               ...\n");
+  print_cstr(STDOUT, " OK\n");
+
+  print_cstr(STDOUT, "TESTING X to A        ...");
   test_x_to_a();
-  print_cstr(STDOUT, "TEST X to A:                OK\n");
-  print_cstr(STDOUT, "------------------------------\n");
-  print_cstr(STDOUT, "TEST ALL:                   OK\n");
+  print_cstr(STDOUT, " OK\n");
 
   exit(0);
 }
