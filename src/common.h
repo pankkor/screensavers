@@ -627,7 +627,7 @@ static i64 cstr_len(const char *cstr) {
 }
 
 // Unaligned memory comparison
-static i32 is_umem_eq(u8 * restrict l, u8 * restrict r, i64 size) {
+static i32 is_mem_eq(u8 * restrict l, u8 * restrict r, i64 size) {
   while (size >= 32) {
     u8 b0 = *(u64 *)(l +  0) != *(u64 *)(r +  0);
     u8 b1 = *(u64 *)(l +  8) != *(u64 *)(r +  8);
@@ -663,34 +663,43 @@ static i32 is_umem_eq(u8 * restrict l, u8 * restrict r, i64 size) {
   return 1;
 }
 
-// Aligned memory comparison
-static i32 is_amem_eq_neon(u8 * ALIGNED(16) restrict l,
-    u8 * ALIGNED(16) restrict r, i64 size) {
+static i32 is_mem_eq_neon_aligned32(u8 * ALIGNED(32) restrict l,
+    u8 * ALIGNED(32) restrict r, i64 size) {
   while (size >= 32) {
     uint8x16x2_t vl = vld2q_u8(l);
     uint8x16x2_t vr = vld2q_u8(r);
-    uint8x16_t m0 = vceqq_u8(vl.val[0], vr.val[0]);
-    uint8x16_t m1 = vceqq_u8(vl.val[1], vr.val[1]);
-    uint8_t min0 = vminvq_u8(m0);
-    uint8_t min1 = vminvq_u8(m1);
-
-    if (min0 != 0xFF || min1 != 0xFF) { return 0; }
-
+    uint8x16_t eq0 = vceqq_u8(vl.val[0], vr.val[0]); // eq - 0xFF, ne - 0x00
+    uint8x16_t eq1 = vceqq_u8(vl.val[1], vr.val[1]);
+    uint8_t min0 = vminvq_u8(eq0);
+    uint8_t min1 = vminvq_u8(eq1);
+    if ((min0 & min1) == 0) { return 0; }
     size -= 32; l += 32; r += 32;
   }
-    // vbslq_u8
-    //
-    // uint8x16_t m = vorrq_u8(m0, m1);
-    //
-    // uint8x16_t eq = vceqzq_u8(ne);
+
+  if (size > 0) {
+    // 1..31 bytes left to cmp
+    u8 mask[32] = {0};
+    for (int i = size; i < 32; ++i) { mask[i] = 0xFF; }
+    uint8x16x2_t vmask = vld2q_u8(mask);
+    uint8x16x2_t vl = vld2q_u8(l);
+    uint8x16x2_t vr = vld2q_u8(r);
+    uint8x16_t eq0 = vceqq_u8(vl.val[0], vr.val[0]); // eq - 0xFF, ne - 0x00
+    uint8x16_t eq1 = vceqq_u8(vl.val[1], vr.val[1]);
+    uint8x16_t meq0 = vorrq_u8(eq0, vmask.val[0]); // 0xFF - masked out
+    uint8x16_t meq1 = vorrq_u8(eq1, vmask.val[1]);
+    uint8_t min0 = vminvq_u8(meq0);
+    uint8_t min1 = vminvq_u8(meq1);
+    if ((min0 & min1) == 0) { return 0; }
+  }
   return 1;
 }
 
-FORCE_INLINE static i32 is_amem_eq(u8 * ALIGNED(16) restrict l,
-    u8 * ALIGNED(16) restrict r, i64 size) {
-  return is_umem_eq(l, r, size);
-  // TODO: make enable neon impl
-  // return is_amem_eq_neon(l, r, size);
+// Memory comparison of aligned buffers. Fetches and compares 32 bytes per iteration, so
+// Make sure that buffer size is multiple of 32 bytes. Size however can be not
+// multiple of 32.
+FORCE_INLINE static i32 is_mem_eq_aligned32(u8 * ALIGNED(32) restrict l,
+    u8 * ALIGNED(32) restrict r, i64 size) {
+  return is_mem_eq_neon_aligned32(l, r, size);
 }
 
 FORCE_INLINE static void print_buf(i32 fd, const char *buf, i32 size) {

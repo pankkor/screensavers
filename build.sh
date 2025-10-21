@@ -96,7 +96,6 @@ EOF
   fi
 
   $build_cmd || die "failed to build '$src'!"
-
 done
 
 if [ $run_test -eq 1 -a -f ./build/test ]; then
