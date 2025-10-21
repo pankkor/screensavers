@@ -26,7 +26,7 @@ typedef i32                 b32;
 #define I64_MIN             (-(9223372036854775807ll)-1)
 #define U64_MAX             (-1ull)
 
-#define FORCE_INLINE        inline __attribute__((always_inline))
+#define INLINE        inline __attribute__((always_inline))
 #define NO_RETURN           __attribute__((noreturn))
 #define ALIGNED(x)          __attribute__((aligned(x)))
 #define ARRAY_COUNT(x)      (i64)(sizeof(x) / sizeof(x[0]))
@@ -61,7 +61,7 @@ typedef i32                 b32;
 // --------------------------------------
 // syscall
 // --------------------------------------
-FORCE_INLINE static i64 syscall1(i64 sys_num, i64 a0) {
+INLINE static i64 syscall1(i64 sys_num, i64 a0) {
   i64 ret;
   __asm__ volatile (
     "mov x16,     %[sys_num]\n"   // syscall number
@@ -75,7 +75,7 @@ FORCE_INLINE static i64 syscall1(i64 sys_num, i64 a0) {
   return ret;
 }
 
-FORCE_INLINE static i64 syscall2(i64 sys_num, i64 a0, i64 a1) {
+INLINE static i64 syscall2(i64 sys_num, i64 a0, i64 a1) {
   i64 ret;
   __asm__ volatile (
     "mov x16,     %[sys_num]\n"
@@ -90,7 +90,7 @@ FORCE_INLINE static i64 syscall2(i64 sys_num, i64 a0, i64 a1) {
   return ret;
 }
 
-FORCE_INLINE static i64 syscall3(i64 sys_num, i64 a0, i64 a1, i64 a2) {
+INLINE static i64 syscall3(i64 sys_num, i64 a0, i64 a1, i64 a2) {
   i64 ret;
   __asm__ volatile (
     "mov x16,     %[sys_num]\n"
@@ -106,7 +106,7 @@ FORCE_INLINE static i64 syscall3(i64 sys_num, i64 a0, i64 a1, i64 a2) {
   return ret;
 }
 
-FORCE_INLINE static i64 syscall6(i64 sys_num, i64 a0, i64 a1, i64 a2, i64 a3, i64 a4, i64 a5) {
+INLINE static i64 syscall6(i64 sys_num, i64 a0, i64 a1, i64 a2, i64 a3, i64 a4, i64 a5) {
   i64 ret;
   __asm__ volatile (
     "mov x16,     %[sys_num]\n"
@@ -137,32 +137,32 @@ FORCE_INLINE static i64 syscall6(i64 sys_num, i64 a0, i64 a1, i64 a2, i64 a3, i6
 #define SYS_FTRUNCATE   201
 
 // TODO EINTR
-FORCE_INLINE static NO_RETURN void exit(i32 ec) {
+INLINE static NO_RETURN void exit(i32 ec) {
   syscall1(SYS_EXIT, ec);
   __builtin_unreachable();
 }
 
-FORCE_INLINE static i64 sys_write(i32 fd, const void *buf, u64 size) {
+INLINE static i64 sys_write(i32 fd, const void *buf, u64 size) {
   return syscall3(SYS_WRITE, fd, (i64)buf, size);
 }
 
-FORCE_INLINE static i32 sys_open(const char *filepath, i32 flags, u16 mode) {
+INLINE static i32 sys_open(const char *filepath, i32 flags, u16 mode) {
   return syscall3(SYS_OPEN, (i64)filepath, flags, mode);
 }
 
-FORCE_INLINE static i32 sys_close(i32 fd) {
+INLINE static i32 sys_close(i32 fd) {
   return syscall1(SYS_CLOSE, fd);
 }
 
-FORCE_INLINE static i32 sys_munmap(void *addr, u64 len) {
+INLINE static i32 sys_munmap(void *addr, u64 len) {
   return syscall2(SYS_MUNMAP, (u64)addr, len);
 }
 
-FORCE_INLINE static void *sys_mmap(void *addr, u64 len, i32 prot, i32 flags, i32 fd, u64 offset) {
+INLINE static void *sys_mmap(void *addr, u64 len, i32 prot, i32 flags, i32 fd, u64 offset) {
   return (void *)syscall6(SYS_MMAP, (u64)addr, len, prot, flags, fd, offset);
 }
 
-FORCE_INLINE static i32 sys_ftruncate(i32 fd, u64 length) {
+INLINE static i32 sys_ftruncate(i32 fd, u64 length) {
   return syscall2(SYS_FTRUNCATE, fd, length);
 }
 
@@ -204,20 +204,20 @@ i64 os_free_pages(void *p, u64 page_count) {
 // --------------------------------------
 // Helper
 // --------------------------------------
-FORCE_INLINE static b32 is_bit_set(i32 flags, i32 bit) {
+INLINE static b32 is_bit_set(i32 flags, i32 bit) {
   return (flags & bit) == bit;
 }
 
 // --------------------------------------
 // Time Stamp Counter
 // --------------------------------------
-FORCE_INLINE static u64 read_cpu_timer_freq(void) {
+INLINE static u64 read_cpu_timer_freq(void) {
   u64 val;
   __asm__ volatile ("mrs %0, cntfrq_el0" : "=r" (val));
   return val;
 }
 
-FORCE_INLINE static u64 read_cpu_timer(void) {
+INLINE static u64 read_cpu_timer(void) {
   u64 val;
   // use isb to avoid speculative read of cntvct_el0
   __asm__ volatile ("isb;\n\tmrs %0, cntvct_el0" : "=r" (val));
@@ -232,7 +232,7 @@ struct xorshift64_state {
   u64 a;
 };
 
-FORCE_INLINE static u64 xorshift64(struct xorshift64_state *state) {
+INLINE static u64 xorshift64(struct xorshift64_state *state) {
   u64 x = state->a;
   x ^= x << 7;
   x ^= x >> 9;
@@ -243,29 +243,29 @@ FORCE_INLINE static u64 xorshift64(struct xorshift64_state *state) {
 // --------------------------------------
 // Math
 // --------------------------------------
-FORCE_INLINE static u32 absi32(i32 v) {
+INLINE static u32 absi32(i32 v) {
   u32 t = v >> 31;
   v ^= t;
   v += t & 1;
   return v;
 }
 
-FORCE_INLINE static u64 absi64(i64 v) {
+INLINE static u64 absi64(i64 v) {
   u64 t = v >> 63;
   v ^= t;
   v += t & 1;
   return v;
 }
 
-FORCE_INLINE static f32 clampf32(f32 v, f32 lo, f32 hi) {
+INLINE static f32 clampf32(f32 v, f32 lo, f32 hi) {
   return v > hi ? hi : v < lo ? lo : v;
 }
 
-FORCE_INLINE static f32 lerpf32(f32 k, f32 x, f32 y) {
+INLINE static f32 lerpf32(f32 k, f32 x, f32 y) {
   return (1.0f - k) * x + y * k;
 }
 
-FORCE_INLINE static f32 sqrtf32(f32 x) {
+INLINE static f32 sqrtf32(f32 x) {
   f32 res;
   __asm__ volatile (
     "fsqrt %s[res], %s[x]"
@@ -276,7 +276,7 @@ FORCE_INLINE static f32 sqrtf32(f32 x) {
 }
 
 // TODO: loses precisions when x and y range is big
-FORCE_INLINE static f32 fmodf32(f32 x, f32 y) {
+INLINE static f32 fmodf32(f32 x, f32 y) {
   f32 res;
   __asm__ volatile (
     "fdiv   s2, %s[x], %s[y]\n"     // s2 = x / y
@@ -290,7 +290,7 @@ FORCE_INLINE static f32 fmodf32(f32 x, f32 y) {
   return res;
 }
 
-FORCE_INLINE static f32 fracf32(f32 x) {
+INLINE static f32 fracf32(f32 x) {
   f32 res;
   __asm__ volatile (
     "frintm s1, %s[x]\n"            // s1 = floor(x)
@@ -324,32 +324,32 @@ f32 cosf32(f32 turns) {
   return sinf32(0.25 - turns);
 }
 
-FORCE_INLINE static f32 len_v2(const f32 v[2]) {
+INLINE static f32 len_v2(const f32 v[2]) {
   return sqrtf32(v[0] * v[0] + v[1] * v[1]);
 }
 
-FORCE_INLINE static f32 len_v3(const f32 v[3]) {
+INLINE static f32 len_v3(const f32 v[3]) {
   return sqrtf32(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
 }
 
-FORCE_INLINE static f32 len_v4(const f32 v[4]) {
+INLINE static f32 len_v4(const f32 v[4]) {
   return sqrtf32(v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]);
 }
 
-FORCE_INLINE static void norm_v2(f32 inout[2]) {
+INLINE static void norm_v2(f32 inout[2]) {
   f32 l = len_v2(inout);
   inout[0] /= l;
   inout[1] /= l;
 }
 
-FORCE_INLINE static void norm_v3(f32 inout[3]) {
+INLINE static void norm_v3(f32 inout[3]) {
   f32 l = len_v3(inout);
   inout[0] /= l;
   inout[1] /= l;
   inout[2] /= l;
 }
 
-FORCE_INLINE static void norm_v4(f32 inout[4]) {
+INLINE static void norm_v4(f32 inout[4]) {
   f32 l = len_v4(inout);
   inout[0] /= l;
   inout[1] /= l;
@@ -357,15 +357,15 @@ FORCE_INLINE static void norm_v4(f32 inout[4]) {
   inout[3] /= l;
 }
 
-FORCE_INLINE static f32 dot_v2(const f32 v1[2], const f32 v2[2]) {
+INLINE static f32 dot_v2(const f32 v1[2], const f32 v2[2]) {
   return v1[0] * v2[0] + v1[1] * v2[1];
 }
 
-FORCE_INLINE static f32 dot_v3(const f32 v1[3], const f32 v2[3]) {
+INLINE static f32 dot_v3(const f32 v1[3], const f32 v2[3]) {
   return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
 }
 
-FORCE_INLINE static void cross_v3(
+INLINE static void cross_v3(
     f32 out[3], const f32 v1[3], const f32 v2[3]) {
   f32 ret[3];
   ret[0] = v1[1] * v2[2] - v1[2] * v2[1];
@@ -449,7 +449,7 @@ const u8 s_hex[16] = "0123456789ABCDEF";
 
 // Write u64 to buffer[16] as Hex.
 // Buffer has to be at least 16 bytes long
-FORCE_INLINE static void u64_to_a16x(u8 out[16], u64 v) {
+INLINE static void u64_to_a16x(u8 out[16], u64 v) {
   out[ 0] = s_hex[(v >> 60) & 0xF];
   out[ 1] = s_hex[(v >> 56) & 0xF];
   out[ 2] = s_hex[(v >> 52) & 0xF];
@@ -470,7 +470,7 @@ FORCE_INLINE static void u64_to_a16x(u8 out[16], u64 v) {
 
 // Write u32 to buffer[8] as Hex.
 // Buffer has to be at least 8 bytes long
-FORCE_INLINE static void u32_to_a8x(u8 out[8], u32 v) {
+INLINE static void u32_to_a8x(u8 out[8], u32 v) {
   out[0]  = s_hex[(v >> 28) & 0xF];
   out[1]  = s_hex[(v >> 24) & 0xF];
   out[2]  = s_hex[(v >> 20) & 0xF];
@@ -481,14 +481,14 @@ FORCE_INLINE static void u32_to_a8x(u8 out[8], u32 v) {
   out[7]  = s_hex[(v >>  0) & 0xF];
 }
 
-FORCE_INLINE static u64 u64_to_a1d_(u8 *out, u64 u) {
+INLINE static u64 u64_to_a1d_(u8 *out, u64 u) {
   u64 q = u / 10;
   u64 r = u - q * 10;
   out[0] = '0' + r;
   return q;
 }
 
-FORCE_INLINE static u32 u32_to_a1d_(u8 *out, u32 u) {
+INLINE static u32 u32_to_a1d_(u8 *out, u32 u) {
   u32 q = u / 10;
   u32 r = u - q * 10;
   out[0] = '0' + r;
@@ -496,7 +496,7 @@ FORCE_INLINE static u32 u32_to_a1d_(u8 *out, u32 u) {
 }
 
 // Write u64 to buffer[20]
-FORCE_INLINE static void u64_to_a20(u8 out[20], u64 u) {
+INLINE static void u64_to_a20(u8 out[20], u64 u) {
   u = u64_to_a1d_(out + 19, u);
   u = u64_to_a1d_(out + 18, u);
   u = u64_to_a1d_(out + 17, u);
@@ -520,7 +520,7 @@ FORCE_INLINE static void u64_to_a20(u8 out[20], u64 u) {
 }
 
 // Write u32 to buffer[10]
-FORCE_INLINE static void u32_to_a10(u8 out[10], u32 u) {
+INLINE static void u32_to_a10(u8 out[10], u32 u) {
   u = u32_to_a1d_(out +  9, u);
   u = u32_to_a1d_(out +  8, u);
   u = u32_to_a1d_(out +  7, u);
@@ -535,7 +535,7 @@ FORCE_INLINE static void u32_to_a10(u8 out[10], u32 u) {
 
 // Write i64 to buffer[20] with sign at buffer[0].
 // i=-1234 -> "-0000000000000001234"
-FORCE_INLINE static void i64_to_a20(u8 out[20], i64 i) {
+INLINE static void i64_to_a20(u8 out[20], i64 i) {
   out[0] = '+' + (('-' - '+') & (i >> 63));
   u64 u = absi64(i);
   u = u64_to_a1d_(out + 19, u);
@@ -561,7 +561,7 @@ FORCE_INLINE static void i64_to_a20(u8 out[20], i64 i) {
 
 // Write i32 to buffer[11] with sign at buffer[0].
 // i=-1234 -> "-0000001234"
-FORCE_INLINE static void i32_to_a11(u8 out[11], i32 i) {
+INLINE static void i32_to_a11(u8 out[11], i32 i) {
   out[0] = '+' + (('-' - '+') & (i >> 31));
   u32 u = absi32(i);
   u32_to_a10(out + 1, u);
@@ -571,7 +571,7 @@ FORCE_INLINE static void i32_to_a11(u8 out[11], i32 i) {
 // u=00001234, c='_') -> "____1234"
 //                            ^
 // Returns pointer to the first not substituted character
-FORCE_INLINE static u8 *fmt_subs_leading_zeroes(u8 *inout, i32 size, u8 c) {
+INLINE static u8 *fmt_subs_leading_zeroes(u8 *inout, i32 size, u8 c) {
   while(size > 0 && inout[0] == '0') {
     inout[0] = c;
     ++inout; --size;
@@ -581,7 +581,7 @@ FORCE_INLINE static u8 *fmt_subs_leading_zeroes(u8 *inout, i32 size, u8 c) {
 
 // Write i64 to buffer[21] padding right with all '0' substituted with `c`.
 // i=-1234, c='_' -> "_______________-1234"
-FORCE_INLINE static void i64_to_a20_fmt_right(u8 out[20], i64 i, u8 c) {
+INLINE static void i64_to_a20_fmt_right(u8 out[20], i64 i, u8 c) {
   i64_to_a20(out, i);
   u8 *next = fmt_subs_leading_zeroes(out + 1, 18, c);
   SWAP(next[-1], out[0]);
@@ -589,7 +589,7 @@ FORCE_INLINE static void i64_to_a20_fmt_right(u8 out[20], i64 i, u8 c) {
 
 // Write i32 to buffer[11] padding right with all '0' substituted with `c`.
 // i=-1234, c='_' -> "_______________-1234"
-FORCE_INLINE static void i32_to_a11_fmt_right(u8 out[11], i32 i, u8 c) {
+INLINE static void i32_to_a11_fmt_right(u8 out[11], i32 i, u8 c) {
   i32_to_a11(out, i);
   u8 *next = fmt_subs_leading_zeroes(out + 1, 9, c);
   SWAP(next[-1], out[0]);
@@ -597,14 +597,14 @@ FORCE_INLINE static void i32_to_a11_fmt_right(u8 out[11], i32 i, u8 c) {
 
 // Write i64 to buffer[21] padding right with all '0' substituted with `c`.
 // u=1234, c='_' -> "_______________1234"
-FORCE_INLINE static void u64_to_a20_fmt_right(u8 out[20], u64 u, u8 c) {
+INLINE static void u64_to_a20_fmt_right(u8 out[20], u64 u, u8 c) {
   u64_to_a20(out, u);
   fmt_subs_leading_zeroes(out, 19, c);
 }
 
 // Write i32 to buffer[11] padding right with all '0' substituted with `c`.
 // u=1234, c='_' -> "_______________1234"
-FORCE_INLINE static void u32_to_a10_fmt_right(u8 out[10], u32 u, u8 c) {
+INLINE static void u32_to_a10_fmt_right(u8 out[10], u32 u, u8 c) {
   u32_to_a10(out, u);
   fmt_subs_leading_zeroes(out, 9, c);
 }
@@ -697,17 +697,17 @@ static i32 is_mem_eq_neon_aligned32(u8 * ALIGNED(32) restrict l,
 // Memory comparison of aligned buffers. Fetches and compares 32 bytes per iteration, so
 // Make sure that buffer size is multiple of 32 bytes. Size however can be not
 // multiple of 32.
-FORCE_INLINE static i32 is_mem_eq_aligned32(u8 * ALIGNED(32) restrict l,
+INLINE static i32 is_mem_eq_aligned32(u8 * ALIGNED(32) restrict l,
     u8 * ALIGNED(32) restrict r, i64 size) {
   return is_mem_eq_neon_aligned32(l, r, size);
 }
 
-FORCE_INLINE static void print_buf(i32 fd, const char *buf, i32 size) {
+INLINE static void print_buf(i32 fd, const char *buf, i32 size) {
   sys_write(fd, buf, size);
 }
 
 // Print \0 terminated string
-FORCE_INLINE static void print_cstr(i32 fd, const char *cstr) {
+INLINE static void print_cstr(i32 fd, const char *cstr) {
   if (cstr) {
     i64 size = cstr_len(cstr);
     sys_write(fd, cstr, size);
@@ -835,16 +835,16 @@ static void print_f32s(i32 fd, i32 size, f32 arr[size]) {
   }
 }
 
-FORCE_INLINE static void print_v3(i32 fd, f32 v[3]) {
+INLINE static void print_v3(i32 fd, f32 v[3]) {
   print_f32s(fd, 3, v);
 }
 
-FORCE_INLINE static void print_v4(i32 fd, f32 v[4]) {
+INLINE static void print_v4(i32 fd, f32 v[4]) {
   print_f32s(fd, 4, v);
 }
 
 // Print average FPS and Delta time
-FORCE_INLINE static void print_avg_dt_fps(f32 avg_dt) {
+INLINE static void print_avg_dt_fps(f32 avg_dt) {
   print_cstr(STDOUT, "Average fps: ");
   print_i64(STDOUT, (u64)(1.0f / avg_dt));
   print_cstr(STDOUT, ", dt: ");
@@ -854,14 +854,14 @@ FORCE_INLINE static void print_avg_dt_fps(f32 avg_dt) {
   print_cstr(STDOUT, "us)\n");
 }
 
-FORCE_INLINE static void print_ln(i32 fd) {
+INLINE static void print_ln(i32 fd) {
   print_buf(fd, "\n", 1);
 }
 
 // --------------------------------------
 // Expect/Assert
 // --------------------------------------
-FORCE_INLINE static void debugbreak(void) {
+INLINE static void debugbreak(void) {
 #if defined(_MSC_VER)
     __debugbreak();
 #elif defined(__clang__)
@@ -882,7 +882,7 @@ FORCE_INLINE static void debugbreak(void) {
     __FILE__ ":" STR(__LINE__) ": Fatal:   (" STR(condition) ") == 0\n"\
     msg "\n")
 
-FORCE_INLINE static void expect_msg(i32 condition, const char *msg) {
+INLINE static void expect_msg(i32 condition, const char *msg) {
   if (!condition) {
     print_cstr(STDERR, msg);
     debugbreak();
@@ -893,7 +893,7 @@ FORCE_INLINE static void expect_msg(i32 condition, const char *msg) {
     __FILE__ ":" STR(__LINE__) ": Warning: (" STR(condition) ") == 0\n"\
     msg "\n")
 
-FORCE_INLINE static void warn_if_msg(i32 condition, const char *msg) {
+INLINE static void warn_if_msg(i32 condition, const char *msg) {
   if (condition) {
     print_cstr(STDERR, msg);
   }
