@@ -26,8 +26,8 @@ typedef i32                 b32;
 #define I64_MIN             (-(9223372036854775807ll)-1)
 #define U64_MAX             (-1ull)
 
-#define INLINE        inline __attribute__((always_inline))
-#define NO_RETURN           __attribute__((noreturn))
+#define INLINE              inline __attribute__((always_inline))
+#define NORETURN            __attribute__((noreturn))
 #define ALIGNED(x)          __attribute__((aligned(x)))
 #define ARRAY_COUNT(x)      (i64)(sizeof(x) / sizeof(x[0]))
 #define static_assert       _Static_assert
@@ -137,7 +137,7 @@ INLINE static i64 syscall6(i64 sys_num, i64 a0, i64 a1, i64 a2, i64 a3, i64 a4, 
 #define SYS_FTRUNCATE   201
 
 // TODO EINTR
-INLINE static NO_RETURN void exit(i32 ec) {
+INLINE static NORETURN void exit(i32 ec) {
   syscall1(SYS_EXIT, ec);
   __builtin_unreachable();
 }
