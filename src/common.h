@@ -136,6 +136,12 @@ INLINE static i64 syscall6(i64 sys_num, i64 a0, i64 a1, i64 a2, i64 a3, i64 a4, 
 #define SYS_MMAP        197
 #define SYS_FTRUNCATE   201
 
+// sys_create
+#define O_CREAT         0x00000200      /* create if nonexistant */
+#define O_RDONLY        0x0000          /* open for reading only */
+#define O_RDWR          0x0002          /* open for reading and writing */
+
+
 // TODO EINTR
 INLINE static NORETURN void exit(i32 ec) {
   syscall1(SYS_EXIT, ec);
@@ -618,12 +624,27 @@ INLINE static void u32_to_a10_fmt_right(u8 out[10], u32 u, u8 c) {
 
 static i64 cstr_len(const char *cstr) {
   i64 ret = 0;
-  if (cstr) {
-    while (*cstr++) {
-      ++ret;
-    }
+  while (*cstr++) {
+    ++ret;
   }
   return ret;
+}
+// Copy c-string up to `n` characters or 0 terminator, (0 terminator is not copied)
+// Returns number of bytes copied
+static i32 cstr_n_copy(char *dst, const char *src, i32 n) {
+  i32 ret = 0;
+  while (ret < n - 1 && *src != 0) {
+    *dst++ = *src++;
+    ++ret;
+  }
+  return ret;
+}
+
+// Fill buffer with bytes `b`
+static void buf_fill(u8 *dst, i32 n, u8 b) {
+  for (i32 i = 0; i < n; ++i) {
+    dst[i] = b;
+  }
 }
 
 // Unaligned memory comparison
@@ -694,10 +715,12 @@ static i32 is_mem_eq_neon_aligned32(u8 * ALIGNED(32) restrict l,
   return 1;
 }
 
+static
+
 // Memory comparison of aligned buffers. Fetches and compares 32 bytes per iteration, so
 // Make sure that buffer size is multiple of 32 bytes. Size however can be not
 // multiple of 32.
-INLINE static i32 is_mem_eq_aligned32(u8 * ALIGNED(32) restrict l,
+INLINE i32 is_mem_eq_aligned32(u8 * ALIGNED(32) restrict l,
     u8 * ALIGNED(32) restrict r, i64 size) {
   return is_mem_eq_neon_aligned32(l, r, size);
 }
