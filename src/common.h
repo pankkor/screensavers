@@ -633,7 +633,7 @@ static i64 cstr_len(const char *cstr) {
 // Returns number of bytes copied
 static i32 cstr_n_copy(char *dst, const char *src, i32 n) {
   i32 ret = 0;
-  while (ret < n - 1 && *src != 0) {
+  while (ret < n && *src != 0) {
     *dst++ = *src++;
     ++ret;
   }
