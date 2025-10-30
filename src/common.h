@@ -280,11 +280,10 @@ INLINE static u64 absi64(i64 v) {
 }
 
 #if 0
-// This is not any faster and compiler, will fail to optimize it away as opposed
-// to implementation of absi64() above.
+// This is not any faster
 INLINE static u64 absi64(i64 x) {
   u64 res;
-  __asm__ volatile (
+  __asm__ (
     "abs %d[res], %d[x]"
     : [res] "=w" (res)
     : [x] "w" (x)
@@ -303,7 +302,7 @@ INLINE static f32 lerpf32(f32 k, f32 x, f32 y) {
 
 INLINE static f32 sqrtf32(f32 x) {
   f32 res;
-  __asm__ volatile (
+  __asm__ (
     "fsqrt %s[res], %s[x]"
     : [res] "=w" (res)
     : [x] "w" (x)
@@ -314,7 +313,7 @@ INLINE static f32 sqrtf32(f32 x) {
 // TODO: loses precisions when x and y range is big
 INLINE static f32 fmodf32(f32 x, f32 y) {
   f32 res;
-  __asm__ volatile (
+  __asm__ (
     "fdiv   s2, %s[x], %s[y]\n"     // s2 = x / y
     "frintm s2, s2\n"               // s2 = floor(s2)
     "fmul   s2, s2, %s[y]\n"        // s2 = y * s2
@@ -328,7 +327,7 @@ INLINE static f32 fmodf32(f32 x, f32 y) {
 
 INLINE static f32 fracf32(f32 x) {
   f32 res;
-  __asm__ volatile (
+  __asm__ (
     "frintm s1, %s[x]\n"            // s1 = floor(x)
     "fsub   %s[ret], %s[x], s1\n"   // res = x - s1
     : [ret] "=w"(res)
