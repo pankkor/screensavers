@@ -11,6 +11,16 @@
 
 #define ESC_DEL "\033[3~"
 
+void test_constants(void) {
+  u64 expected_u64_max = 18446744073709551615ull;
+  u64 u64_max = U64_MAX;
+  TEST_EXPECT(u64_max == expected_u64_max);
+
+  u64 expected_u32_max = 4294967295;
+  u64 u32_max = U32_MAX;
+  TEST_EXPECT(u32_max == expected_u32_max);
+}
+
 void test_math(void) {
   TEST_EXPECT(absi32(2147483647) == 2147483647);
   TEST_EXPECT(absi32(12345678) == 12345678);
@@ -324,6 +334,10 @@ void test_x_to_a(void) {
 // Entry point (aka main)
 // --------------------------------------
 void start(void) {
+  print_cstr(STDOUT, "TESTING CONSTANTS     ...");
+  test_constants();
+  print_cstr(STDOUT, " OK\n");
+
   print_cstr(STDOUT, "TESTING MATH          ...");
   test_math();
   print_cstr(STDOUT, " OK\n");

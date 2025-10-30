@@ -32,6 +32,9 @@ typedef i32                 b32;
 #define ARRAY_COUNT(x)      (i64)(sizeof(x) / sizeof(x[0]))
 #define static_assert       _Static_assert
 
+#define STR1(s)             # s
+#define STR(s)              STR1(s)
+
 #define SWAP(a, b)                                                             \
   do {                                                                         \
     __typeof__(a) tmp = (a);                                                   \
@@ -50,6 +53,19 @@ typedef i32                 b32;
     __typeof__(b) b_ = (b);                                                    \
     a_ <= b_ ? a_ : b_;                                                        \
 })
+
+INLINE static void debugbreak(void) {
+#if defined(_MSC_VER)
+    __debugbreak();
+#elif defined(__clang__)
+    __builtin_debugtrap();
+#else
+    // gcc doesn't have __builtin_debugtrap equivalent
+    // Beware:
+    // __builtin_trap generates SIGILL and code after it will be optmized away.
+    __builtin_trap();
+#endif
+}
 
 // Include std headers after all common macroses defined
 #if defined(__ARM_NEON)
@@ -262,6 +278,20 @@ INLINE static u64 absi64(i64 v) {
   v += t & 1;
   return v;
 }
+
+#if 0
+// This is not any faster and compiler, will fail to optimize it away as opposed
+// to implementation of absi64() above.
+INLINE static u64 absi64(i64 x) {
+  u64 res;
+  __asm__ volatile (
+    "abs %d[res], %d[x]"
+    : [res] "=w" (res)
+    : [x] "w" (x)
+  );
+  return res;
+}
+#endif
 
 INLINE static f32 clampf32(f32 v, f32 lo, f32 hi) {
   return v > hi ? hi : v < lo ? lo : v;
@@ -616,12 +646,8 @@ INLINE static void u32_to_a10_fmt_right(u8 out[10], u32 u, u8 c) {
 }
 
 // --------------------------------------
-// Print
+// C-String operations
 // --------------------------------------
-#define STDIN           0
-#define STDOUT          1
-#define STDERR          2
-
 static i64 cstr_len(const char *cstr) {
   i64 ret = 0;
   while (*cstr++) {
@@ -639,6 +665,10 @@ static i32 cstr_n_copy(char *dst, const char *src, i32 n) {
   }
   return ret;
 }
+
+// --------------------------------------
+// Memory operations
+// --------------------------------------
 
 // Fill buffer with bytes `b`
 static void buf_fill(u8 *dst, i32 n, u8 b) {
@@ -715,15 +745,21 @@ static i32 is_mem_eq_neon_aligned32(u8 * ALIGNED(32) restrict l,
   return 1;
 }
 
-static
-
 // Memory comparison of aligned buffers. Fetches and compares 32 bytes per iteration, so
 // Make sure that buffer size is multiple of 32 bytes. Size however can be not
 // multiple of 32.
-INLINE i32 is_mem_eq_aligned32(u8 * ALIGNED(32) restrict l,
+INLINE static i32 is_mem_eq_aligned32(u8 * ALIGNED(32) restrict l,
     u8 * ALIGNED(32) restrict r, i64 size) {
   return is_mem_eq_neon_aligned32(l, r, size);
 }
+
+// --------------------------------------
+// Print
+// print_*() functions result in unbuffered WRITE syscalls
+// --------------------------------------
+#define STDIN           0
+#define STDOUT          1
+#define STDERR          2
 
 INLINE static void print_buf(i32 fd, const char *buf, i32 size) {
   sys_write(fd, buf, size);
@@ -933,21 +969,6 @@ INLINE static void print_ln(i32 fd) {
 // --------------------------------------
 // Expect/Assert
 // --------------------------------------
-INLINE static void debugbreak(void) {
-#if defined(_MSC_VER)
-    __debugbreak();
-#elif defined(__clang__)
-    __builtin_debugtrap();
-#else
-    // gcc doesn't have __builtin_debugtrap equivalent
-    // Beware:
-    // __builtin_trap generates SIGILL and code after it will be optmized away.
-    __builtin_trap();
-#endif
-}
-
-#define STR1(s) # s
-#define STR(s) STR1(s)
 
 // EXPECT() behaves like Debug + Release assert
 #define EXPECT(condition, msg) expect_msg(!!(condition), \
