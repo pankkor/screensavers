@@ -196,7 +196,7 @@ u64 os_bytes_to_pages(u64 bytes) {
 
 void *os_alloc_pages(u64 page_count) {
   void *m;
-  int flags = MAP_PRIVATE | MAP_ANON;
+  i32 flags = MAP_PRIVATE | MAP_ANON;
   u64 size = page_count * OS_PAGE_SIZE;
   m = sys_mmap(0, size, PROT_READ | PROT_WRITE, flags, -1, 0);
   return m;
@@ -700,7 +700,7 @@ static i32 is_mem_eq_neon_aligned32(u8 * ALIGNED(32) restrict l,
   if (size > 0) {
     // 1..31 bytes left to cmp
     u8 mask[32] = {0};
-    for (int i = size; i < 32; ++i) { mask[i] = 0xFF; }
+    for (i32 i = size; i < 32; ++i) { mask[i] = 0xFF; }
     uint8x16x2_t vmask = vld2q_u8(mask);
     uint8x16x2_t vl = vld2q_u8(l);
     uint8x16x2_t vr = vld2q_u8(r);
@@ -762,7 +762,7 @@ static void print_zero_neg_u64_(i32 fd, u64 v, i32 zero_precision, b32 is_neg) {
   } while (v);
 
   i32 buf_size = buf_end - buf_cur;
-  for (int i = buf_size, size = MIN(20, zero_precision); i < size; ++i) {
+  for (i32 i = buf_size, size = MIN(20, zero_precision); i < size; ++i) {
     *--buf_cur = '0';
   }
 
@@ -793,6 +793,16 @@ static void print_u64(i32 fd, u64 v) {
   print_zero_u64(fd, v, 0);
 }
 
+INLINE static f32 absf(f32 v) {
+  union f32u32 {
+    f32 f;
+    u32 u;
+  };
+  union f32u32 fu = {.f = v};
+  fu.u &= 0x7FFFFFFF;
+  return fu.f;
+}
+
 static void print_f32(i32 fd, f32 v) {
   const char *buf = 0;
   u8 buf_size;
@@ -801,7 +811,6 @@ static void print_f32(i32 fd, f32 v) {
     f32 f;
     u32 u;
   };
-
   union f32u32 fu = {.f = v};
 
   // IEEE-754: 1 bit sign, 8 bits exponent, 23 bits mantissa
@@ -821,28 +830,68 @@ static void print_f32(i32 fd, f32 v) {
     buf = "-INF";
     buf_size = 4;
   } else if (exp == 0xFF && man != 0) {
-    buf = "NAN";
+    buf = "NAN"; // can also print +NAN and -NAN if needed, depending on bit 31
     buf_size = 3;
   }
 
   if (buf) {
     sys_write(fd, buf, buf_size);
   } else {
-    // reset sign
-    fu.u                &= 0x7FFFFFFF;
+    // Reset sign, remembering it
+    i32 sign            = (fu.u & 0x80000000);
+    f32 abs_f           = absf(v);
 
-    // TODO: well, that's wrong for floats that don't fit into u64 :)
-    u64 integer         = (u64)fu.f;
+    // Use scientific notation for floats outside of [2^-10; 2^32] range
+    // We display up to 3 digits of fractional precision so, 2^-10 is enough
+    i32 exp2 = exp - 127; // unbias
+    i32 e10 = 0;
+    b32 is_scientific = exp2 < -10 || exp2 > 32;
+    if (is_scientific) {
+      // Normalize to range [1.0, 10.0)
+      while (abs_f >= 10.0f) {
+       abs_f /= 10.0f; e10 += 1;
+      }
+      while (abs_f < 1.0f) {
+        abs_f *= 10.0f; e10 -= 1;
+      }
+    }
 
-    f32 frac            = fu.f - integer;
-    i64 fraci           = frac * 1000.0f;     // 3 digits precision
+    // At this point f is small enough to fit into u64
+    u64 integer         = abs_f;
+    f32 frac            = abs_f - integer;
 
-    if (v < 0) {
+#if 0
+    // Round to 3 digits
+    i64 fraci           = frac * 1000.0f + 0.5f;
+    if (fraci >= 1000) {
+      fraci   = 0;
+      integer += 1;
+
+      // Integer can overflow to 10 and we need to renormalize to [1.0, 10.0)
+      if (is_scientific && integer >= 10.0f) {
+       integer /= 10.0f; e10 += 1;
+      }
+    }
+#else
+    // Truncate to 3 digits
+    i64 fraci           = frac * 1000.0f;
+#endif
+
+    if (sign) {
       sys_write(fd, "-", 1);
     }
     print_u64(fd, integer);
     sys_write(fd, ".", 1);
-    print_zero_i64(fd, fraci, 3);             // 3 digits precision
+    print_zero_i64(fd, fraci, 3);                 // 3 digits precision
+
+    if (is_scientific) {
+      if (e10 >= 0) {
+        sys_write(fd, "e+", 2);
+      } else {
+        sys_write(fd, "e", 1);
+      }
+      print_zero_i64(fd, e10, 2);
+    }
   }
 }
 

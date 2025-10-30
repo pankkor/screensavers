@@ -52,7 +52,7 @@ static void log_shutdown(void) {
   EXPECT(sys_munmap(s_log_buf, LOG_BYTES) > 0, "Log: shutdown failed");
 }
 
-// Log integer `v` and message `m` to a memory mapped file
+// Log i64 `v` and message `m` to a memory mapped file
 // r|sss.uuuuuu|ffffffffffffffff:llll|hhhhhhhh|iiiiiiiiiii|mmm..mmm\n
 // r - reload count in hex
 // s - seconds
@@ -60,7 +60,7 @@ static void log_shutdown(void) {
 // f - file
 // l - line
 // h - v in hex form
-// i - v in int form
+// i - v in i64 form
 // m - message
 #define LOG_M(v, m) log_m(__FILE_NAME__, __LINE__, (v), (m))
 
