@@ -43,27 +43,28 @@ typedef i32                 b32;
   } while (0)
 
 #define MAX(a, b) ({                                                           \
-    __typeof__(a) a_ = (a);                                                    \
-    __typeof__(b) b_ = (b);                                                    \
-    a_ >= b_ ? a_ : b_;                                                        \
+  __typeof__(a) a_ = (a);                                                      \
+  __typeof__(b) b_ = (b);                                                      \
+  a_ >= b_ ? a_ : b_;                                                          \
 })
 
 #define MIN(a, b) ({                                                           \
-    __typeof__(a) a_ = (a);                                                    \
-    __typeof__(b) b_ = (b);                                                    \
-    a_ <= b_ ? a_ : b_;                                                        \
+  __typeof__(a) a_ = (a);                                                      \
+  __typeof__(b) b_ = (b);                                                      \
+  a_ <= b_ ? a_ : b_;                                                          \
 })
+
 
 INLINE static void debugbreak(void) {
 #if defined(_MSC_VER)
-    __debugbreak();
+  __debugbreak();
 #elif defined(__clang__)
-    __builtin_debugtrap();
+  __builtin_debugtrap();
 #else
-    // gcc doesn't have __builtin_debugtrap equivalent
-    // Beware:
-    // __builtin_trap generates SIGILL and code after it will be optmized away.
-    __builtin_trap();
+  // gcc doesn't have __builtin_debugtrap equivalent
+  // Beware:
+  // __builtin_trap generates SIGILL and code after it will be optmized away.
+  __builtin_trap();
 #endif
 }
 
@@ -122,7 +123,8 @@ INLINE static i64 syscall3(i64 sys_num, i64 a0, i64 a1, i64 a2) {
   return ret;
 }
 
-INLINE static i64 syscall6(i64 sys_num, i64 a0, i64 a1, i64 a2, i64 a3, i64 a4, i64 a5) {
+INLINE static i64 syscall6(i64 sys_num, i64 a0, i64 a1, i64 a2, i64 a3, i64 a4,
+    i64 a5) {
   i64 ret;
   __asm__ volatile (
     "mov x16,     %[sys_num]\n"
@@ -135,7 +137,8 @@ INLINE static i64 syscall6(i64 sys_num, i64 a0, i64 a1, i64 a2, i64 a3, i64 a4, 
     "svc          0x80\n"
     "mov %[ret],  x0\n"
     : [ret] "=r" (ret)
-    : [sys_num] "r" (sys_num), [a0] "r" (a0), [a1] "r" (a1), [a2] "r" (a2), [a3] "r" (a3), [a4] "r" (a4), [a5] "r" (a5)
+    : [sys_num] "r" (sys_num), [a0] "r" (a0), [a1] "r" (a1), [a2] "r" (a2),
+      [a3] "r" (a3), [a4] "r" (a4), [a5] "r" (a5)
     : "x16", "x0", "x1", "x2", "x3", "x4", "x5"
   );
   return ret;
@@ -180,7 +183,8 @@ INLINE static i32 sys_munmap(void *addr, u64 len) {
   return syscall2(SYS_MUNMAP, (u64)addr, len);
 }
 
-INLINE static void *sys_mmap(void *addr, u64 len, i32 prot, i32 flags, i32 fd, u64 offset) {
+INLINE static void *sys_mmap(void *addr, u64 len, i32 prot, i32 flags, i32 fd,
+    u64 offset) {
   return (void *)syscall6(SYS_MMAP, (u64)addr, len, prot, flags, fd, offset);
 }
 
@@ -1277,7 +1281,7 @@ enum KC : u8 {
   KC_SENTINEL, // keep it the biggest value in the enum
 };
 
-enum {KC_SIZE=256};
+enum { KC_SIZE=256 };
 static_assert(KC_SENTINEL < KC_SIZE, "s_keycodes can't contain enum KC");
 
 struct keycodes {

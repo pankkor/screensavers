@@ -81,7 +81,7 @@ void main(void) {                                                            \r\
 }                                                                            \r\
 ";
 
-enum {W = TEXT_W, H = TEXT_H};
+enum { W = TEXT_W, H = TEXT_H };
 f32 depth[W * H];
 
 void donut(f32 turns) {

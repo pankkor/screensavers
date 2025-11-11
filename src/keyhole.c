@@ -50,7 +50,7 @@ enum game_state {
   ((hex & 0x000000FF) >> 0)  / 255.0f,                                         \
 }
 
-enum {PALETTE_COUNT = 4};
+enum { PALETTE_COUNT = 4 };
 static const f32 s_col_palettes[PALETTE_COUNT][4] = {
   RGBA_F32x4(0x540D6EFF),
   RGBA_F32x4(0xEE4266FF),

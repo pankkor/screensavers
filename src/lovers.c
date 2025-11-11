@@ -89,9 +89,9 @@ enum level_state {
   ((hex & 0x000000FF) >> 0)  / 255.0f,                                         \
 }
 
-enum {LOVER_PALETTE_COUNT = 2};
-enum {PALETTE_COUNT = 20};
-enum {NIGHTMARE_PALETTE = PALETTE_COUNT - 1};
+enum { LOVER_PALETTE_COUNT = 2 };
+enum { PALETTE_COUNT = 20 };
+enum { NIGHTMARE_PALETTE = PALETTE_COUNT - 1 };
 static const f32 s_col_palettes[][4] = {
   // Lovers
   RGBA_F32x4(0x2030b7FF),

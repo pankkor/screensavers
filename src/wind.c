@@ -28,10 +28,10 @@
 
 #if 1 // Big and chunky sprites
 #define SPRITE_SIZE     0.175f
-enum {SPRITES_COUNT =  1024};
+enum { SPRITES_COUNT =  1024 };
 #else // Chaos (1M sprites is still ok)
 #define SPRITE_SIZE     0.025f
-enum {SPRITES_COUNT = 1024 * 1024};
+enum { SPRITES_COUNT =  1024 * 1024 };
 #endif
 
 #define SPRITE_SIZE_05  (SPRITE_SIZE * 0.5f)
