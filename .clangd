@@ -1,2 +1,2 @@
 CompileFlags:
-  Remove: -framework *
+  Remove: [-framework *, -e *]
