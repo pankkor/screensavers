@@ -1,9 +1,5 @@
 // Common include
 
-
-// TODO
-// - abs neon vabsd_s64
-
 // --------------------------------------
 // Types
 // --------------------------------------
@@ -160,7 +156,6 @@ INLINE static i64 syscall6(i64 sys_num, i64 a0, i64 a1, i64 a2, i64 a3, i64 a4,
 #define O_RDONLY        0x0000          /* open for reading only */
 #define O_RDWR          0x0002          /* open for reading and writing */
 
-
 // TODO EINTR
 INLINE static NORETURN void exit(i32 ec) {
   syscall1(SYS_EXIT, ec);
@@ -235,6 +230,31 @@ INLINE static b32 is_bit_set(i32 flags, i32 bit) {
 }
 
 // --------------------------------------
+// Atomics
+// --------------------------------------
+// Relaxed fetch+add i32. Returns old value.
+INLINE static i32 fetch_add_i32(i32 *a, i32 inc) {
+  i32 old;
+  __asm__ volatile(
+    "ldadd %w[inc], %w[old], [%[a]]"
+      : [old] "=r" (old)
+      : [a] "r" (a), [inc] "r" (inc)
+  );
+  return old;
+}
+
+// Relaxed fetch+add i64. Returns old value
+INLINE static i32 fetch_add_i64(i64 *a, i64 inc) {
+  i64 old;
+  __asm__ volatile(
+    "ldadd %[inc] %[old] [%[a]]"
+      : [old] "=r" (old)
+      : [a] "r" (a), [inc] "r" (inc)
+  );
+  return old;
+}
+
+// --------------------------------------
 // Time Stamp Counter
 // --------------------------------------
 INLINE static u64 read_cpu_timer_freq(void) {
@@ -276,25 +296,35 @@ INLINE static u32 absi32(i32 v) {
   return v;
 }
 
+#if 1
 INLINE static u64 absi64(i64 v) {
   u64 t = v >> 63;
   v ^= t;
   v += t & 1;
   return v;
 }
-
-#if 0
+#else
 // This is not any faster
 INLINE static u64 absi64(i64 x) {
   u64 res;
   __asm__ (
     "abs %d[res], %d[x]"
-    : [res] "=w" (res)
+    : [res] "=r" (res)
     : [x] "w" (x)
   );
   return res;
 }
 #endif
+
+INLINE static f32 absf(f32 v) {
+  union f32u32 {
+    f32 f;
+    u32 u;
+  };
+  union f32u32 fu = {.f = v};
+  fu.u &= 0x7FFFFFFF;
+  return fu.f;
+}
 
 INLINE static f32 clampf32(f32 v, f32 lo, f32 hi) {
   return v > hi ? hi : v < lo ? lo : v;
@@ -520,6 +550,24 @@ INLINE static void u32_to_a8x(u8 out[8], u32 v) {
   out[7]  = s_hex[(v >>  0) & 0xF];
 }
 
+// Print hex representation of a buffer.
+// `out` has to be twice as big as `buf`
+INLINE static void buf_to_ax(u8 *out, const u8 *buf, i32 size) {
+  for (i32 i = 0; i < size; ++i) {
+    u8 b = buf[i];
+    out[(i << 1) + 0] = s_hex[(b >> 4) & 0xF];
+    out[(i << 1) + 1] = s_hex[(b >> 0) & 0xF];
+  }
+}
+
+// Write vector register uint8x16_t to buffer[32] as Hex.
+// Buffer has to be at least 16 bytes long
+INLINE static void uint8x16_to_a32x(u8 out[32], uint8x16_t v) {
+  u8 buf[16];
+  vst1q_u8(buf, v);
+  buf_to_ax(out, buf, 16);
+}
+
 INLINE static u64 u64_to_a1d_(u8 *out, u64 u) {
   u64 q = u / 10;
   u64 r = u - q * 10;
@@ -618,6 +666,15 @@ INLINE static u8 *fmt_subs_leading_zeroes(u8 *inout, i32 size, u8 c) {
   return inout;
 }
 
+// Shift left trimming all `c` characters
+INLINE static u8 *fmt_trim(u8 *inout, i32 size, u8 c) {
+  while(size > 0 && inout[0] == '0') {
+    inout[0] = c;
+    ++inout; --size;
+  }
+  return inout;
+}
+
 // Write i64 to buffer[21] padding right with all '0' substituted with `c`.
 // i=-1234, c='_' -> "_______________-1234"
 INLINE static void i64_to_a20_fmt_right(u8 out[20], i64 i, u8 c) {
@@ -658,9 +715,11 @@ static i64 cstr_len(const char *cstr) {
   }
   return ret;
 }
-// Copy c-string up to `n` characters or 0 terminator, (0 terminator is not copied)
-// Returns number of bytes copied
-static i32 cstr_n_copy(char *dst, const char *src, i32 n) {
+
+// Copy c-string up to `n` characters or 0 terminator.
+// 0 terminator is not copied.
+// Returns number of bytes copied.
+static i32 cstr_n_copy(u8 *dst, const char *src, i32 n) {
   i32 ret = 0;
   while (ret < n && *src != 0) {
     *dst++ = *src++;
@@ -672,6 +731,22 @@ static i32 cstr_n_copy(char *dst, const char *src, i32 n) {
 // --------------------------------------
 // Memory operations
 // --------------------------------------
+
+// Take `src` buffer up to `n` characters and copy it to `dst` buffer.
+// omitting leading charactes `c`.
+// c='0' "0000abc0" -> "abc0"
+// Returns number of characters copied
+INLINE static i32 buf_n_copy_trim_leading(u8 * restrict dst,
+    const u8 * restrict src, i32 n, u8 c) {
+  i32 ret = 0;
+  i32 i = 0;
+  for (; i < n && src[i] == c; ++i) { }
+  for (; i < n; ++i, ++ret) {
+    dst[ret] = src[i];
+  }
+  return ret;
+}
+
 
 // Fill buffer with bytes `b`
 static void buf_fill(u8 *dst, i32 n, u8 b) {
@@ -717,12 +792,41 @@ static i32 is_mem_eq(u8 * restrict l, u8 * restrict r, i64 size) {
   return 1;
 }
 
+// Create a 32 byte mask:
+//  - `is_FF00 == 0` mask filled with 0x00 up to `size` and 0xFF up to 32,
+//  - `is_FF00 != 0` mask filled with 0xFF up to `size` and 0x00 up to 32,
+// Example
+// - mask32_neon(4, is_FF00):
+// is_FF00 == 0   ->  [0, size) -> 0x00, [size, 31] -> 0xFF
+//    0  1  2  3  4  5  6  7  8    31
+//   00 00 00 00 FF FF FF FF FF .. FF
+//                ^- size = 4
+// is_FF00 == 1   ->  [0, size) -> 0xFF, [size, 31] -> 0x00
+//    0  1  2  3  4  5  6  7  8    31
+//   FF FF FF FF 00 00 00 00 00 .. 00
+//                ^- size = 4
+INLINE static uint8x16x2_t mask32_neon(i32 size, b32 is_FF00) {
+  uint8x16x2_t ret;
+  uint8x16_t idx0  = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15};
+  uint8x16_t idx1  = {16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31};
+
+  uint8x16_t vsize = vdupq_n_u8((u8)size);
+  if (is_FF00) {
+    ret.val[0] = vcltq_u8(idx0, vsize);
+    ret.val[1] = vcltq_u8(idx1, vsize);
+  } else {
+    ret.val[0] = vcgeq_u8(idx0, vsize);
+    ret.val[1] = vcgeq_u8(idx1, vsize);
+  }
+  return ret;
+}
+
 static i32 is_mem_eq_neon_aligned32(u8 * ALIGNED(32) restrict l,
     u8 * ALIGNED(32) restrict r, i64 size) {
   while (size >= 32) {
-    uint8x16x2_t vl = vld2q_u8(l);
-    uint8x16x2_t vr = vld2q_u8(r);
-    uint8x16_t eq0 = vceqq_u8(vl.val[0], vr.val[0]); // eq - 0xFF, ne - 0x00
+    uint8x16x2_t vl = { vld1q_u8(l), vld1q_u8(l + 16) };
+    uint8x16x2_t vr = { vld1q_u8(r), vld1q_u8(r + 16) };
+    uint8x16_t eq0 = vceqq_u8(vl.val[0], vr.val[0]);  // eq - 0xFF, ne - 0x00
     uint8x16_t eq1 = vceqq_u8(vl.val[1], vr.val[1]);
     uint8_t min0 = vminvq_u8(eq0);
     uint8_t min1 = vminvq_u8(eq1);
@@ -732,28 +836,76 @@ static i32 is_mem_eq_neon_aligned32(u8 * ALIGNED(32) restrict l,
 
   if (size > 0) {
     // 1..31 bytes left to cmp
-    u8 mask[32] = {0};
-    for (i32 i = size; i < 32; ++i) { mask[i] = 0xFF; }
-    uint8x16x2_t vmask = vld2q_u8(mask);
-    uint8x16x2_t vl = vld2q_u8(l);
-    uint8x16x2_t vr = vld2q_u8(r);
-    uint8x16_t eq0 = vceqq_u8(vl.val[0], vr.val[0]); // eq - 0xFF, ne - 0x00
-    uint8x16_t eq1 = vceqq_u8(vl.val[1], vr.val[1]);
-    uint8x16_t meq0 = vorrq_u8(eq0, vmask.val[0]); // 0xFF - masked out
+    uint8x16x2_t vmask = mask32_neon(size, 0 /*00FF mask*/);
+    uint8x16x2_t vl = { vld1q_u8(l), vld1q_u8(l + 16) };
+    uint8x16x2_t vr = { vld1q_u8(r), vld1q_u8(r + 16) };
+    uint8x16_t eq0  = vceqq_u8(vl.val[0], vr.val[0]); // eq - 0xFF, ne - 0x00
+    uint8x16_t eq1  = vceqq_u8(vl.val[1], vr.val[1]);
+    uint8x16_t meq0 = vorrq_u8(eq0, vmask.val[0]);    // 0xFF - masked out
     uint8x16_t meq1 = vorrq_u8(eq1, vmask.val[1]);
-    uint8_t min0 = vminvq_u8(meq0);
-    uint8_t min1 = vminvq_u8(meq1);
+    uint8_t min0    = vminvq_u8(meq0);
+    uint8_t min1    = vminvq_u8(meq1);
     if ((min0 & min1) == 0) { return 0; }
   }
   return 1;
 }
 
-// Memory comparison of aligned buffers. Fetches and compares 32 bytes per iteration, so
-// Make sure that buffer size is multiple of 32 bytes. Size however can be not
-// multiple of 32.
+// Memory comparison of aligned buffers, 32 bytes at a time.
+// Make sure that buffer size is multiple of 32 bytes, all 32 bytes will be
+// fetched. Size however can be not multiple of 32.
 INLINE static i32 is_mem_eq_aligned32(u8 * ALIGNED(32) restrict l,
     u8 * ALIGNED(32) restrict r, i64 size) {
+#if defined(__ARM_NEON)
   return is_mem_eq_neon_aligned32(l, r, size);
+#else
+  return is_mem_eq(l, r, size);
+#endif
+}
+
+INLINE static void mem_cp(u8 * dst, const u8 *src, int size) {
+  for (i32 i = 0; i < size; ++i) {
+    dst[i] = src[i];
+  }
+}
+
+static void mem_cp_neon_aligned32(u8 * ALIGNED(32) restrict dst,
+    u8 * ALIGNED(32) restrict src, i64 size) {
+  while (size >= 32) {
+    // De-interleaved loads paired with interleaved stores
+    uint8x16x2_t vsrc = vld2q_u8(src);
+    vst2q_u8(dst, vsrc);
+    size -= 32; dst += 32; src += 32;
+  }
+
+  if (size > 0) {
+    // 1..31 bytes left to cmp
+    uint8x16x2_t vmask = mask32_neon(size, 0 /*00FF mask*/);
+    uint8x16x2_t vdst   = { vld1q_u8(dst), vld1q_u8(dst + 16) };
+    uint8x16x2_t vsrc   = { vld1q_u8(src), vld1q_u8(src + 16) };
+
+    // Blend
+    // mask:  0 0 0 0 F F F F
+    // out :  S S S S D D D D
+    uint8x16x2_t vres   = {
+      vbslq_u8(vmask.val[0], vdst.val[0], vsrc.val[0]),
+      vbslq_u8(vmask.val[1], vdst.val[1], vsrc.val[1]),
+    };
+
+    vst1q_u8(dst +  0, vres.val[0]);
+    vst1q_u8(dst + 16, vres.val[1]);
+  }
+}
+
+// Copy aligned aligned buffers, 32 bytes at a time.
+// Make sure that buffer size is multiple of 32 bytes, all 32 bytes will be
+// fetched. Size however can be not multiple of 32.
+INLINE static void mem_cp_aligned32(u8 * ALIGNED(32) restrict dst,
+    u8 * ALIGNED(32) restrict src, i64 size) {
+#if defined(__ARM_NEON)
+  mem_cp_neon_aligned32(dst, src, size);
+#else
+  mem_cp(dst, src, size);
+#endif
 }
 
 // --------------------------------------
@@ -764,8 +916,20 @@ INLINE static i32 is_mem_eq_aligned32(u8 * ALIGNED(32) restrict l,
 #define STDOUT          1
 #define STDERR          2
 
-INLINE static void print_buf(i32 fd, const char *buf, i32 size) {
+// Print buffer as it is
+INLINE static void print_buf(i32 fd, const u8 *buf, i32 size) {
   sys_write(fd, buf, size);
+}
+
+// Print buffer as hex
+INLINE static void print_bufx(i32 fd, const u8 *buf, i32 size) {
+  u8 tmp[2];
+  for (i32 i = 0; i < size; ++i) {
+    u8 b = buf[i];
+    tmp[0] = s_hex[(b >> 4) & 0xF];
+    tmp[1] = s_hex[(b >> 0) & 0xF];
+    sys_write(fd, tmp, 2);
+  }
 }
 
 // Print \0 terminated string
@@ -830,16 +994,6 @@ static void print_i64(i32 fd, i64 v) {
 
 static void print_u64(i32 fd, u64 v) {
   print_zero_u64(fd, v, 0);
-}
-
-INLINE static f32 absf(f32 v) {
-  union f32u32 {
-    f32 f;
-    u32 u;
-  };
-  union f32u32 fu = {.f = v};
-  fu.u &= 0x7FFFFFFF;
-  return fu.f;
 }
 
 static void print_f32(i32 fd, f32 v) {
@@ -954,6 +1108,13 @@ INLINE static void print_v4(i32 fd, f32 v[4]) {
   print_f32s(fd, 4, v);
 }
 
+// Print hex representation of uint8x16_t
+INLINE static void print_uint8x16(i32 fd, uint8x16_t v) {
+  u8 buf[32];
+  uint8x16_to_a32x(buf, v);
+  sys_write(fd, buf, ARRAY_COUNT(buf));
+}
+
 // Print average FPS and Delta time
 INLINE static void print_avg_dt_fps(f32 avg_dt) {
   print_cstr(STDOUT, "Average fps: ");
@@ -966,7 +1127,7 @@ INLINE static void print_avg_dt_fps(f32 avg_dt) {
 }
 
 INLINE static void print_ln(i32 fd) {
-  print_buf(fd, "\n", 1);
+  print_buf(fd, (const u8 *)"\n", 1);
 }
 
 // --------------------------------------
