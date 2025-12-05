@@ -1,12 +1,4 @@
-# mac
-.clangd
+*.dSYM
 *.DS_Store
 
-# tags
-cscope.out
-tags
-
-# build
-*.dSYM
 build/
-
