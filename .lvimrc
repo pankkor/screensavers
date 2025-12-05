@@ -5,4 +5,13 @@ set list
 
 let &l:makeprg="cd ".g:localvimrc_script_dir_unresolved." && ./build.sh"
 
-nnoremap <F2> :make --no-test <C-R>=expand("%")<CR><CR>:!./build/<C-R>=expand("%:t:r")<CR><CR>
+if !exists('*s:build_and_run_current_file')
+  function! s:build_and_run_current_file()
+    let l:full = expand('%')
+    let l:root = expand('%:t:r')
+    execute 'make --no-test ' . fnameescape(l:full)
+    execute '!./build/' . fnameescape(l:root)
+  endfunction
+endif
+
+nnoremap <F2> :call <SID>build_and_run_current_file()<CR>
