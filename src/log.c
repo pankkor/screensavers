@@ -22,25 +22,29 @@
 // shrinking/removing filename and shrinking message size
 //
 // NOTE: call log_shutdown() to be sure that file is written to file system.
-u8  *s_log_buf;           // mmapped file
-u32 *s_log_atomic;        // 0xLLLLRRRR:
-                          // 0xLLLL - line number, 0xRRRR - restart count
-u64 s_log_start_tsc;      // Starting time stamp counter
-f32 s_log_tsc_ifreq;      // 1.0/time_stamp_counter_frequency
-u16 s_log_cur_n_restart;  // Restart number of current run
+struct log {
+  u8  *buf;           // mmapped file
+  u32 *atomic;        // 0xLLLLRRRR:
+                      // 0xLLLL - line number, 0xRRRR - restart count
+  u64 start_tsc;      // Starting time stamp counter
+  f32 tsc_ifreq;      // 1.0/time_stamp_counter_frequency
+  u16 cur_n_restart;  // Restart number of current run
+};
 
 enum {
   LOG_LINES_BYTES = 65536,          // Size of all log data lines.
                                     // Must be power of 2, multiple of page size
   LOG_ATOMIC_OFF  = LOG_LINES_BYTES,// Atomic offset. Atomic follows log data
-  LOG_ALL_BYTES   = LOG_LINES_BYTES + sizeof(*s_log_atomic), // Total mmap size
+  LOG_ALL_BYTES   = LOG_LINES_BYTES + sizeof(((struct log *)0)->atomic),
+                                    // Total mmap size
   LOG_LINE_BYTES  = 128,            // Log line size (see 'Correction' above)
   LOG_LINES       = LOG_LINES_BYTES / LOG_LINE_BYTES, // Number of lines.
                                     // Must be power of 2.
   LOG_MESSAGE_SIZE= 71,             // Log message is trimmed to this size
 };
 
-static void log_init(const char *filepath, u64 start_tsc, f32 tsc_ifreq) {
+static void log_init(struct log *log, const char *filepath, u64 start_tsc,
+    f32 tsc_ifreq) {
   i32 fd = sys_open(filepath, O_RDWR | O_CREAT, 0644);
 
   EXPECT(fd >= 0, "Log: mmap failed");
@@ -50,19 +54,20 @@ static void log_init(const char *filepath, u64 start_tsc, f32 tsc_ifreq) {
         fd, 0);
     sys_close(fd);
     EXPECT(p >= (void *)p, "Log: mmap file failed");
-    s_log_buf = p;
+    log->buf = p;
   }
 
-  s_log_tsc_ifreq = tsc_ifreq;
-  s_log_start_tsc = start_tsc;
+  log->tsc_ifreq = tsc_ifreq;
+  log->start_tsc = start_tsc;
 
-  s_log_atomic = (u32 *)(s_log_buf + LOG_ATOMIC_OFF);
-  u32 a = fetch_add_u32(s_log_atomic, 1);
-  s_log_cur_n_restart = a & 0xFFFF;
+  log->atomic = (u32 *)(log->buf + LOG_ATOMIC_OFF);
+  u32 a = fetch_add_u32(log->atomic, 1);
+  log->cur_n_restart = a & 0xFFFF;
 }
 
-static void log_shutdown(void) {
-  EXPECT(sys_munmap(s_log_buf, LOG_ALL_BYTES) == 0, "Log: shutdown failed");
+static void log_shutdown(struct log *log) {
+  EXPECT(sys_munmap(log->buf, LOG_ALL_BYTES) == 0, "Log: shutdown failed");
+  log->buf = 0;
 }
 
 // Log i64 `v` and message `m` to a 128 byte wide line in a memory mapped file
@@ -75,14 +80,13 @@ static void log_shutdown(void) {
 // h - v in hex form
 // i - v in i32 form
 // m - message (71 chars)
-#define LOG_M(v, m) log_m(__FILE_NAME__, __LINE__, (v), (m))
-
-static void log_m(const char* filename, i32 file_line, i32 v, const char* m) {
+static void log_m(const struct log *log, const char* filename, i32 file_line, i32 v,
+    const char* m) {
   enum { FILL_C = '.' };  // fill empty space with this char
   u8 tmp[LOG_LINE_BYTES]; // cache line
 
-  u64 tsc = read_cpu_timer() - s_log_start_tsc;
-  f32 sec_f32 = tsc * s_log_tsc_ifreq;
+  u64 tsc = read_cpu_timer() - log->start_tsc;
+  f32 sec_f32 = tsc * log->tsc_ifreq;
   i32 sec = sec_f32;
   i32 usec = (sec_f32 - sec) * 1000000;
 
@@ -91,7 +95,7 @@ static void log_m(const char* filename, i32 file_line, i32 v, const char* m) {
 
 
   // r| - restart count in hex
-  tmp[i + 0] = s_hex[s_log_cur_n_restart & 0xF];
+  tmp[i + 0] = s_hex[log->cur_n_restart & 0xF];
   tmp[i + 1] = '|';
   i += 2;
 
@@ -146,10 +150,17 @@ static void log_m(const char* filename, i32 file_line, i32 v, const char* m) {
   tmp[LOG_LINE_BYTES - 1] = '\n';
 
   // Atomic and IO
-  u32 log_line = (fetch_add_u32(s_log_atomic, 0x10000) >> 16) & (LOG_LINES - 1);
-  u8 *dst = s_log_buf + log_line * LOG_LINE_BYTES;
+  u32 log_line = (fetch_add_u32(log->atomic, 0x10000) >> 16) & (LOG_LINES - 1);
+  u8 *dst = log->buf + log_line * LOG_LINE_BYTES;
   mem_cp_aligned32(dst, tmp, 128);
 }
+
+// Convenience macro.
+// User must provide `g_log` with address of shared `struct log`.
+#define LOG_M(v, m) log_m(g_log, __FILE_NAME__, __LINE__, (v), (m))
+
+struct log s_log;
+struct log *g_log = &s_log;
 
 void start(void) {
   u64 start_tsc = read_cpu_timer();
@@ -159,7 +170,7 @@ void start(void) {
   print_cstr(STDOUT, "\n");
   print_cstr(STDOUT, "<Press Ctrl+C to exit>\n");
 
-  log_init("log.log", start_tsc, tsc_ifreq);
+  log_init(&s_log, "log.log", start_tsc, tsc_ifreq);
 
   // Print something to the log
   u8 luminance[12] = ".,-~:;=!*#$@"; // don't keep null terminator
@@ -182,6 +193,6 @@ void start(void) {
     LOG_M(cur_text_line, (const char*)(msg + TEXT_W * cur_text_line));
   }
 
-  log_shutdown();
+  log_shutdown(&s_log);
   exit(0);
 }

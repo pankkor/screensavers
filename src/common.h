@@ -1651,4 +1651,3 @@ static GLuint create_gl_shader_program(const char *vert_glsl,
 
   return prog;
 }
-
