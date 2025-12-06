@@ -1,5 +1,5 @@
 // mmapped circular log file
-// Creates logfile log.log and writes log to it.
+// Creates logfile 'log.log' and writes to it.
 //
 // Platforms
 //   macOS AArch64
@@ -10,11 +10,16 @@
 
 #include "common.h"
 
-// Mmapped log file. Inspired by Timothy Lottes
-// mmapped file io. Writes fixed size lines in a ring buffer fashion.
+// Mmapped log file. Inspired by Timothy Lottes.
+// Writes fixed size lines to mmapped log file in a ring buffer fashion.
 // At the end of a file there is a 32-bit atomic that marks current
 // run number and currently written line.
-// Line size -> 128 (cache line size)
+// Line size -> 128-byte (cache line size)
+//
+// Correction:
+// 128-byte is L2 cache line size on Apple silicon. L1$ line is still 64-byte.
+// It's fine for now, but log line size can be reduced to 64-bytes by
+// shrinking/removing filename and shrinking message size
 //
 // NOTE: call log_shutdown() to be sure that file is written to file system.
 u8  *s_log_buf;           // mmapped file
@@ -29,11 +34,10 @@ enum {
                                     // Must be power of 2, multiple of page size
   LOG_ATOMIC_OFF  = LOG_LINES_BYTES,// Atomic offset. Atomic follows log data
   LOG_ALL_BYTES   = LOG_LINES_BYTES + sizeof(*s_log_atomic), // Total mmap size
-  LOG_LINE_BYTES  = 128,            // Log line size.
-                                    // Must be cache size to avoid false sharing
+  LOG_LINE_BYTES  = 128,            // Log line size (see 'Correction' above)
   LOG_LINES       = LOG_LINES_BYTES / LOG_LINE_BYTES, // Number of lines.
                                     // Must be power of 2.
-  LOG_MESSAGE_SIZE=71,              // Log message is trimmed to this size
+  LOG_MESSAGE_SIZE= 71,             // Log message is trimmed to this size
 };
 
 static void log_init(const char *filepath, u64 start_tsc, f32 tsc_ifreq) {
@@ -69,7 +73,7 @@ static void log_shutdown(void) {
 // f - file
 // l - line
 // h - v in hex form
-// i - v in i64 form
+// i - v in i32 form
 // m - message (71 chars)
 #define LOG_M(v, m) log_m(__FILE_NAME__, __LINE__, (v), (m))
 
@@ -157,6 +161,7 @@ void start(void) {
 
   log_init("log.log", start_tsc, tsc_ifreq);
 
+  // Print something to the log
   u8 luminance[12] = ".,-~:;=!*#$@"; // don't keep null terminator
   enum { TEXT_W = LOG_MESSAGE_SIZE, TEXT_H = 1024};
   u8 msg[TEXT_W * TEXT_H];
