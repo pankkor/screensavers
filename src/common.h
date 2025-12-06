@@ -232,9 +232,9 @@ INLINE static b32 is_bit_set(i32 flags, i32 bit) {
 // --------------------------------------
 // Atomics
 // --------------------------------------
-// Relaxed fetch+add i32. Returns old value.
-INLINE static i32 fetch_add_i32(i32 *a, i32 inc) {
-  i32 old;
+// Relaxed fetch+add u32. Returns old value.
+INLINE static u32 fetch_add_u32(u32 *a, u32 inc) {
+  u32 old;
   __asm__ volatile(
     "ldadd %w[inc], %w[old], [%[a]]"
       : [old] "=r" (old)
@@ -243,11 +243,11 @@ INLINE static i32 fetch_add_i32(i32 *a, i32 inc) {
   return old;
 }
 
-// Relaxed fetch+add i64. Returns old value
-INLINE static i32 fetch_add_i64(i64 *a, i64 inc) {
-  i64 old;
+// Relaxed fetch+add u64. Returns old value
+INLINE static u64 fetch_add_u64(u64 *a, u64 inc) {
+  u64 old;
   __asm__ volatile(
-    "ldadd %[inc] %[old] [%[a]]"
+    "ldadd %[inc], %[old], [%[a]]"
       : [old] "=r" (old)
       : [a] "r" (a), [inc] "r" (inc)
   );

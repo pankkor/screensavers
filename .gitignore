@@ -1,4 +1,6 @@
 *.dSYM
 *.DS_Store
 
+// Artifacts
 build/
+*.log

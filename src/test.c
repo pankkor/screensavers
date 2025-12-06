@@ -87,6 +87,7 @@ static void test_neon(void) {
 }
 
 static void test_math(void) {
+  // abs
   TEST_EXPECT(absi32(2147483647) == 2147483647);
   TEST_EXPECT(absi32(12345678) == 12345678);
   TEST_EXPECT(absi32(1) == 1);
@@ -105,6 +106,50 @@ static void test_math(void) {
   TEST_EXPECT(absi64(-2147483648) == 2147483648);
   TEST_EXPECT(absi64(-9223372036854775807) == 9223372036854775807);
   TEST_EXPECT(absi64(-9223372036854775807ll - 1) == 9223372036854775808ull);
+
+  // Fetch add u32
+  {
+    u32 a = 0xFFFFFFFF;
+    TEST_EXPECT(fetch_add_u32(&a, 0x10000) == 0xFFFFFFFF);
+    TEST_EXPECT(a == 0x0000FFFF);
+  }
+  {
+    u32 a = 0xFFFFFFFF;
+    TEST_EXPECT(fetch_add_u32(&a, 0x1) == 0xFFFFFFFF);
+    TEST_EXPECT(a == 0x00000000);
+  }
+  {
+    u32 a = 0x0000FFFF;
+    TEST_EXPECT(fetch_add_u32(&a, 0x1) == 0x0000FFFF);
+    TEST_EXPECT(a == 0x00010000);
+  }
+  // Fetch add u64
+  {
+    u64 a = 0xFFFFFFFFFFFFFFFF;
+    TEST_EXPECT(fetch_add_u64(&a, 0x100000000) == 0xFFFFFFFFFFFFFFFF);
+    TEST_EXPECT(a == 0x00000000FFFFFFFF);
+  }
+  {
+    u64 a = 0xFFFFFFFFFFFFFFFF;
+    TEST_EXPECT(fetch_add_u64(&a, 0x1) == 0xFFFFFFFFFFFFFFFF);
+    TEST_EXPECT(a == 0x0000000000000000);
+  }
+  // Fetch add mixed
+  {
+    u64 a = 0x00000000FFFFFFFF;
+    TEST_EXPECT(fetch_add_u64(&a, 0x1) == 0x00000000FFFFFFFF);
+    TEST_EXPECT(a == 0x0000000100000000);
+  }
+  {
+    u64 a = 0xFFFFFFFFFFFFFFFF;
+    TEST_EXPECT(fetch_add_u32((u32 *)&a, 0x1) == 0xFFFFFFFF);
+    TEST_EXPECT(a == 0xFFFFFFFF00000000);
+  }
+  {
+    u64 a = 0xFFFFFFFFFFFFFFFF;
+    TEST_EXPECT(fetch_add_u32((u32 *)&a + 1, 0x1) == 0xFFFFFFFF);
+    TEST_EXPECT(a == 0x00000000FFFFFFFF);
+  }
 }
 
 static void test_memory(void) {
