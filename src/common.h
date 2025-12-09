@@ -1,8 +1,8 @@
 // Common include
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Types
-// --------------------------------------
+// -----------------------------------------------------------------------------
 typedef signed char         i8;
 typedef unsigned char       u8;
 typedef short               i16;
@@ -71,9 +71,9 @@ INLINE static void debugbreak(void) {
 #error Unsupported architecture
 #endif
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // syscall
-// --------------------------------------
+// -----------------------------------------------------------------------------
 INLINE static i64 syscall1(i64 sys_num, i64 a0) {
   i64 ret;
   __asm__ volatile (
@@ -140,9 +140,9 @@ INLINE static i64 syscall6(i64 sys_num, i64 a0, i64 a1, i64 a2, i64 a3, i64 a4,
   return ret;
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Syscalls
-// --------------------------------------
+// -----------------------------------------------------------------------------
 #define SYS_EXIT        1
 #define SYS_WRITE       4
 #define SYS_OPEN        5
@@ -187,9 +187,9 @@ INLINE static i32 sys_ftruncate(i32 fd, u64 length) {
   return syscall2(SYS_FTRUNCATE, fd, length);
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Virtual Memory
-// --------------------------------------
+// -----------------------------------------------------------------------------
 #if 0
 #include <mach/vm_page_size.h>  // extern vm_page_size
 #define OS_PAGE_SIZE vm_page_size
@@ -222,16 +222,16 @@ i64 os_free_pages(void *p, u64 page_count) {
   return sys_munmap(p, size);
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Helper
-// --------------------------------------
+// -----------------------------------------------------------------------------
 INLINE static b32 is_bit_set(i32 flags, i32 bit) {
   return (flags & bit) == bit;
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Atomics
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Relaxed fetch+add u32. Returns old value.
 INLINE static u32 fetch_add_u32(u32 *a, u32 inc) {
   u32 old;
@@ -254,9 +254,9 @@ INLINE static u64 fetch_add_u64(u64 *a, u64 inc) {
   return old;
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Time Stamp Counter
-// --------------------------------------
+// -----------------------------------------------------------------------------
 INLINE static u64 read_cpu_timer_freq(void) {
   u64 val;
   __asm__ volatile ("mrs %0, cntfrq_el0" : "=r" (val));
@@ -270,9 +270,9 @@ INLINE static u64 read_cpu_timer(void) {
   return val;
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Rand
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // TODO: this doesn't seem to be a good random
 struct xorshift64_state {
   u64 a;
@@ -286,9 +286,9 @@ INLINE static u64 xorshift64(struct xorshift64_state *state) {
   return x;
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Math
-// --------------------------------------
+// -----------------------------------------------------------------------------
 INLINE static u32 absi32(i32 v) {
   u32 t = v >> 31;
   v ^= t;
@@ -511,9 +511,9 @@ void rot_v3_q4(f32 out[3], const f32 v[3], const f32 q[4]) {
   out[0] = ret[0]; out[1] = ret[1]; out[2] = ret[2];
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Number to char array
-// --------------------------------------
+// -----------------------------------------------------------------------------
 const u8 s_hex[16] = "0123456789ABCDEF";
 
 // Write u64 to buffer[16] as Hex.
@@ -705,9 +705,9 @@ INLINE static void u32_to_a10_fmt_right(u8 out[10], u32 u, u8 c) {
   fmt_subs_leading_zeroes(out, 9, c);
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // C-String operations
-// --------------------------------------
+// -----------------------------------------------------------------------------
 static i64 cstr_len(const char *cstr) {
   i64 ret = 0;
   while (*cstr++) {
@@ -728,9 +728,9 @@ static i32 cstr_n_copy(u8 *dst, const char *src, i32 n) {
   return ret;
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Memory operations
-// --------------------------------------
+// -----------------------------------------------------------------------------
 
 // Take `src` buffer up to `n` characters and copy it to `dst` buffer.
 // omitting leading charactes `c`.
@@ -908,10 +908,10 @@ INLINE static void mem_cp_aligned32(u8 * ALIGNED(32) restrict dst,
 #endif
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Print
 // print_*() functions result in unbuffered WRITE syscalls
-// --------------------------------------
+// -----------------------------------------------------------------------------
 #define STDIN           0
 #define STDOUT          1
 #define STDERR          2
@@ -1130,9 +1130,9 @@ INLINE static void print_ln(i32 fd) {
   print_buf(fd, (const u8 *)"\n", 1);
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Expect/Assert
-// --------------------------------------
+// -----------------------------------------------------------------------------
 
 // EXPECT() behaves like Debug + Release assert
 #define EXPECT(condition, msg) expect_msg(!!(condition), \
@@ -1160,9 +1160,9 @@ INLINE static void warn_if_msg(i32 condition, const char *msg) {
 #define TEST_EXPECT(condition) expect_msg(!!(condition), \
     __FILE__ ":" STR(__LINE__) ": Test failed: (" STR(condition) ") == 0\n")
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // nostdlib stubs
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Stack protector stubs could be generated by the compiler
 u64 __stack_chk_guard = 0xDEADBEEF;
 
@@ -1171,15 +1171,177 @@ void __stack_chk_fail(void) {
     debugbreak();
 }
 
+// -----------------------------------------------------------------------------
+// Logger
+// -----------------------------------------------------------------------------
+
+// Mmapped log file. Inspired by Timothy Lottes.
+// Writes fixed size lines to mmapped log file in a ring buffer fashion.
+// At the end of a file there is a 32-bit atomic that marks current
+// run number and currently written line.
+// Line size -> 128-byte (cache line size)
+//
+// Correction:
+// 128-byte is L2 cache line size on Apple silicon. L1$ line is still 64-byte.
+// It's fine for now, but log line size can be reduced to 64-bytes by
+// shrinking/removing filename and shrinking message size
+//
+// NOTE: call log_shutdown() to be sure that file is written to file system.
+struct log {
+  u8  *buf;           // mmapped file
+  u32 *atomic;        // 0xLLLLRRRR:
+                      // 0xLLLL - line number, 0xRRRR - restart count
+  u64 start_tsc;      // Starting time stamp counter
+  f32 tsc_ifreq;      // 1.0/time_stamp_counter_frequency
+  u16 cur_n_restart;  // Restart number of current run
+};
+
+enum {
+  LOG_LINES_BYTES = 65536,          // Size of all log data lines.
+                                    // Must be power of 2, multiple of page size
+  LOG_ATOMIC_OFF  = LOG_LINES_BYTES,// Atomic offset. Atomic follows log data
+  LOG_ALL_BYTES   = LOG_LINES_BYTES + sizeof(((struct log *)0)->atomic),
+                                    // Total mmap size
+  LOG_LINE_BYTES  = 128,            // Log line size (see 'Correction' above)
+  LOG_LINES       = LOG_LINES_BYTES / LOG_LINE_BYTES, // Number of lines.
+                                    // Must be power of 2.
+  LOG_MESSAGE_SIZE= 71,             // Log message is trimmed to this size
+};
+
+static void log_init(struct log *log, const char *filepath, u64 start_tsc,
+    f32 tsc_ifreq) {
+  i32 fd = sys_open(filepath, O_RDWR | O_CREAT, 0644);
+
+  EXPECT(fd >= 0, "Log: mmap failed");
+  EXPECT(sys_ftruncate(fd, LOG_ALL_BYTES) >= 0, "Log: ftruncate failed");
+  if (fd >= 0 ) {
+    void *p = sys_mmap(0, LOG_ALL_BYTES, PROT_READ | PROT_WRITE, MAP_SHARED,
+        fd, 0);
+    sys_close(fd);
+    EXPECT(p >= (void *)p, "Log: mmap file failed");
+    log->buf = p;
+  }
+
+  log->tsc_ifreq = tsc_ifreq;
+  log->start_tsc = start_tsc;
+
+  log->atomic = (u32 *)(log->buf + LOG_ATOMIC_OFF);
+  // Can overflow into line number on every 65536 runs, so we won't care
+  u32 a = fetch_add_u32(log->atomic, 1);
+  log->cur_n_restart = a & 0xFFFF;
+}
+
+static void log_shutdown(struct log *log) {
+  EXPECT(sys_munmap(log->buf, LOG_ALL_BYTES) == 0, "Log: shutdown failed");
+  log->buf = 0;
+}
+
+// Log i64 `v` and message `m` to a 128 byte wide line in a memory mapped file
+// r|sss.uuuuuu|ffffffffffffffff:llll|hhhhhhhh|iiiiiiiiiii|mmm..mmm\n
+// r - restart count in hex
+// s - seconds
+// u - microseconds
+// f - file
+// l - line
+// h - v in hex form
+// i - v in i32 form
+// m - message (71 chars)
+static void log_m(const struct log *log, const char* filename, i32 file_line, i32 v,
+    const char* m) {
+  EXPECT(log->buf, "Logger must be initialized with `log_init(..)`");
+
+  enum { FILL_C = '.' };  // fill empty space with this char
+  u8 tmp[LOG_LINE_BYTES]; // cache line
+
+  u64 tsc = read_cpu_timer() - log->start_tsc;
+  f32 sec_f32 = tsc * log->tsc_ifreq;
+  i32 sec = sec_f32;
+  i32 usec = (sec_f32 - sec) * 1000000;
+
+  // Fill in cache line buffer
+  i32 i = 0;
+
+  // r| - restart count in hex
+  tmp[i + 0] = s_hex[log->cur_n_restart & 0xF];
+  tmp[i + 1] = '|';
+  i += 2;
+
+  // sss.uuuuuu| - time since start
+  // sss. - seconds since start
+  u32 s = sec % 1000; // warp to 999 sec
+  s = u32_to_a1d_(tmp + i + 2, s);
+  s = u32_to_a1d_(tmp + i + 1, s);
+  s = u32_to_a1d_(tmp + i + 0, s);
+  tmp[i + 3] = '.';
+  i += 4;
+
+  // uuuuuu| - microseconds since start
+  u32 u = usec;
+  u = u32_to_a1d_(tmp + i + 5, u);
+  u = u32_to_a1d_(tmp + i + 4, u);
+  u = u32_to_a1d_(tmp + i + 3, u);
+  u = u32_to_a1d_(tmp + i + 2, u);
+  u = u32_to_a1d_(tmp + i + 1, u);
+  u = u32_to_a1d_(tmp + i + 0, u);
+  tmp[i + 6] = '|';
+  i += 7;
+
+  // ffffffffffffffff: - filename
+  i32 filename_size = cstr_n_copy(tmp + i, filename, 16);
+  buf_fill((u8 *)tmp + i + filename_size, 16 - filename_size , FILL_C);
+  tmp[i + 16] = ':';
+  i += 17;
+
+  // llll| - line in file
+  u32 l = file_line % 10000;
+  l = u32_to_a1d_(tmp + i + 3, l);
+  l = u32_to_a1d_(tmp + i + 2, l);
+  l = u32_to_a1d_(tmp + i + 1, l);
+  l = u32_to_a1d_(tmp + i + 0, l);
+  fmt_subs_leading_zeroes(tmp + i, 4, FILL_C);
+  tmp[i + 4] = '|';
+  i += 5;
+
+  // hhhhhhhh| - hex
+  u32_to_a8x(tmp + i, v);
+  tmp[i + 8] = '|';
+  i += 9;
+
+  // iiiiiiiiiii| - i32
+  i32_to_a11_fmt_right(tmp + i, v, FILL_C);
+  tmp[i + 11] = '|';
+  i += 12;
+
+  i += cstr_n_copy(tmp + i, m, LOG_LINE_BYTES - i - 1);
+  buf_fill(tmp + i, LOG_LINE_BYTES - i - 1, FILL_C);
+  tmp[LOG_LINE_BYTES - 1] = '\n';
+
+  // Atomic and IO
+  u32 log_line = (fetch_add_u32(log->atomic, 0x10000) >> 16) & (LOG_LINES - 1);
+  u8 *dst = log->buf + log_line * LOG_LINE_BYTES;
+  mem_cp_aligned32(dst, tmp, 128);
+}
+
+// Shared logger
+struct log g_log;
+
+// Convenience macro that Uses shared logger.
+// Don't forget to initialize `g_log` before calling the macro!
+#define LOG_M(v, m) log_m(&g_log, __FILE_NAME__, __LINE__, (v), (m))
+
+// -----------------------------------------------------------------------------
+// GL stuff follows
+// -----------------------------------------------------------------------------
+
 #define GL_SILENCE_DEPRECATION
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/gl3.h>
 #include <OpenGL/gl3ext.h>
 #include <CoreGraphics/CoreGraphics.h>
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Private CoreGraphics API
-// --------------------------------------
+// -----------------------------------------------------------------------------
 typedef enum {
   kCGSOrderBelow = -1,
   kCGSOrderOut,       // hides the window
@@ -1237,9 +1399,9 @@ extern CGSSpaceID CGSGetActiveSpace(CGSConnectionID connection);
 extern void CGSAddWindowsToSpaces(CGSConnectionID cid, CFArrayRef windows,
     CFArrayRef spaces);
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Window
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Window with OpenGL context
 struct window {
   CGDirectDisplayID did;
@@ -1416,9 +1578,9 @@ static i32 window_flush(struct window *w) {
   return cgl_err;
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Event Loop
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // Key Codes. Direct mapping to kVK_* virutal keycodes.
 // All virtual keycode constants are defined in HIToolbox/Events.h
 // #include <Carbon/Carbon.h>
@@ -1587,9 +1749,9 @@ static void event_loop_shutdown(struct event_loop *loop) {
   *loop = (struct event_loop){0};
 }
 
-// --------------------------------------
+// -----------------------------------------------------------------------------
 // OpenGL helpers
-// --------------------------------------
+// -----------------------------------------------------------------------------
 #define CHECK_GL_ERROR()                                                       \
   do {                                                                         \
     GLenum gl_err = glGetError();                                              \
@@ -1651,3 +1813,6 @@ static GLuint create_gl_shader_program(const char *vert_glsl,
 
   return prog;
 }
+
+//
+
