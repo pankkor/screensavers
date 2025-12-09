@@ -61,6 +61,7 @@ static void log_init(struct log *log, const char *filepath, u64 start_tsc,
   log->start_tsc = start_tsc;
 
   log->atomic = (u32 *)(log->buf + LOG_ATOMIC_OFF);
+  // Can overflow into line number on every 65536 runs, so we won't care
   u32 a = fetch_add_u32(log->atomic, 1);
   log->cur_n_restart = a & 0xFFFF;
 }
