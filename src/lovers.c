@@ -741,7 +741,7 @@ void start(void) {
         if (is_bit_set(state.flags, SPRITE_STATE_MOVE)) {
           pos[0]        += vel[0] * SIM_TICK;
           pos[1]        += vel[1] * SIM_TICK;
-          // Change direction on colliding with bounds
+          // Change direction on collision with bounds
           dmask[0]      = pos[0] < bounds[0] || pos[0] > bounds[1];
           dmask[1]      = pos[1] < bounds[2] || pos[1] > bounds[3];
           vel[0]        *= (1 - (dmask[0] << 1));
@@ -751,7 +751,7 @@ void start(void) {
 
           scale_u       = vel[0] < 0.0f ? -1.0f : 1.0f;
 
-          // Change direction on colliding with bounds
+          // Change direction on collision with bounds
           dmask[0]      = pos[0] < bounds[0] || pos[0] > bounds[1];
           dmask[1]      = pos[1] < bounds[2] || pos[1] > bounds[3];
         }
@@ -762,8 +762,8 @@ void start(void) {
 
           if (scale[0] >= 3.0f) {
             state.flags &= ~SPRITE_STATE_SCALE_UP;
-            scale[0]      = 1.0f;
-            scale[1]      = 1.0f;
+            scale[0]    = 1.0f;
+            scale[1]    = 1.0f;
           }
         }
 

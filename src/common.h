@@ -1233,7 +1233,7 @@ static void log_init(struct log *log, const char *filepath, u64 start_tsc,
 
 static void log_shutdown(struct log *log) {
   EXPECT(sys_munmap(log->buf, LOG_ALL_BYTES) == 0, "Log: shutdown failed");
-  log->buf = 0;
+  *log = (struct log){0};
 }
 
 // Log i64 `v` and message `m` to a 128 byte wide line in a memory mapped file
@@ -1604,7 +1604,7 @@ enum KC : u8 {
   KC_SENTINEL, // keep it the biggest value in the enum
 };
 
-enum { KC_SIZE=256 };
+enum { KC_SIZE = 256 };
 static_assert(KC_SENTINEL < KC_SIZE, "s_keycodes can't contain enum KC");
 
 struct keycodes {
@@ -1689,7 +1689,7 @@ static CGEventRef event_handler(CGEventTapProxy proxy, CGEventType type,
     }
 #endif
 
-  // By not returning `event` we swallow it
+  // By not returning `event` we swallow it (only for kCGEventTapOptionDefault)
   return 0;
 }
 
@@ -1702,8 +1702,12 @@ static void event_loop_init(struct event_loop *loop) {
 
   event_mask  = (1 << kCGEventKeyDown) | (1 << kCGEventKeyUp)
     | (1 << kCGEventFlagsChanged);
+  // For debug with lldb create Listen event tap.
+  b32 debug = 1;
+  CGEventTapOptions tap_options =
+    debug ? kCGEventTapOptionListenOnly : kCGEventTapOptionDefault;
   event_tap   = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
-      kCGEventTapOptionDefault, event_mask, event_handler, loop);
+      tap_options, event_mask, event_handler, loop);
   EXPECT(event_tap, "CGEventTapCreate() failed");
 
   source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, event_tap, 0);
@@ -1734,8 +1738,15 @@ static b32 event_loop_step(struct event_loop *loop) {
 #else
   (void)loop;
 #endif
-  CFRunLoopRunResult res = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.0, 1);
-  return res == kCFRunLoopRunHandledSource;
+  b32 ret = 0;
+  CFRunLoopRunResult res;
+  do
+  {
+    res = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.0, 1);
+    ret = ret || res == kCFRunLoopRunHandledSource;
+  }
+  while(res != kCFRunLoopRunFinished && res != kCFRunLoopRunTimedOut);
+  return ret;
 }
 
 static void event_loop_shutdown(struct event_loop *loop) {
