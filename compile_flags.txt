@@ -5,11 +5,11 @@
 -Wno-fixed-enum-extension
 -Wno-gnu-statement-expression-from-macro-expansion
 -Wno-unused-function
--Og
+-O0
 -mcpu=native
 -g
--ffreestanding
 -nostdlib
+-nostartfiles
 -e _start
 -fno-unwind-tables
 -fno-asynchronous-unwind-tables
