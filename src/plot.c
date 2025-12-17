@@ -5,7 +5,7 @@
 // Build
 //   ./build.sh
 // Run
-//   ./build/plot
+//   ./build/log
 
 #include "common.h"
 
@@ -62,7 +62,7 @@ void start(void) {
   struct window w;
 
   event_loop_init(&loop);
-  window_init(&w, 0 /*is_full_screen*/);
+  window_init(&w, 0 /* vsync */, 0 /*is_full_screen*/);
 
   const GLubyte* version_cstr = glGetString(GL_VERSION);
   print_cstr(STDOUT, "OpenGL version: \n");
@@ -163,12 +163,13 @@ void start(void) {
     }
 #endif
 
-    glUniform1ui(plot_loc_points_size_minus_one, PLOT_POINTS_COUNT - 1);
-
     // Update plots
     u32 inserted_idx = plot0.end;
     plot0.points[plot0.end] = clampf32(dt * 50.0f, 0.0f, 1.0f);
     plot0.end = (plot0.end + 1) % PLOT_POINTS_COUNT;
+
+    // Renderer
+    glUniform1ui(plot_loc_points_size_minus_one, PLOT_POINTS_COUNT - 1);
 
     // Draw plots
     glBindBuffer(GL_ARRAY_BUFFER, points_bo);

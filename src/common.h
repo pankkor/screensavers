@@ -1462,7 +1462,7 @@ struct window {
 };
 
 // Init transparent window and OpenGL context
-static void window_init(struct window *w, b32 is_full_screen) {
+static void window_init(struct window *w, b32 is_vsync, b32 is_full_screen) {
   CGDirectDisplayID did;
   CGWindowID        wid;
   CGSConnectionID   cid;
@@ -1590,6 +1590,10 @@ static void window_init(struct window *w, b32 is_full_screen) {
 
   cgl_err = CGLSetCurrentContext(glctx);
   EXPECT(!cgl_err, "CGLSetCurrentContext() failed\n");
+
+  GLint swap_interval = is_vsync ? 1 : 0;
+  CGLSetParameter(glctx, kCGLCPSwapInterval, &swap_interval);
+  EXPECT(!cgl_err, "CGLSetParameter() failed\n");
 
   *w = (struct window){
     .did    = did,
