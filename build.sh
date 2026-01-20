@@ -56,6 +56,22 @@ done
 
 mkdir -p build || die "failed to make 'build' directory!"
 
+# Create entitlements
+entitlements_plist="./build/entitlements.plist"
+
+cat > "$entitlements_plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.get-task-allow</key>
+  <true/>
+</dict>
+</plist>
+EOF
+[ $? = 0 ] || die "Failed to write '$entitlements_plist'"
+
 for src in $srcs; do
   basename="${src##*/}"
   basename_wo_ext="${basename%.*}"
@@ -68,7 +84,7 @@ for src in $srcs; do
   info_plist="./build/${basename_wo_ext}_Info.plist"
   embed_info_plist_flags="-Wl,-sectcreate,__TEXT,__info_plist,$info_plist"
 
-  cat > build/${basename_wo_ext}_Info.plist << EOF
+  cat > "$info_plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -81,21 +97,30 @@ for src in $srcs; do
   <string>1.0</string>
   <key>MetalCaptureEnabled</key>
   <true/>
+  <key>com.apple.security.get-task-allow</key>
+  <true/>
 </dict>
+</plist>
 EOF
-
   [ $? = 0 ] || die "Failed to write '$info_plist'"
 
-  # Build macOS aarch64 OpenGL
-  build_cmd="clang -o $out $src $embed_info_plist_flags $cc_flags"
-
+  # Build
   echo "Building '$src' -> '$out'..."
+  set -- clang -o $out $src $cc_flags $embed_info_plist_flags
   if [ $verbose -eq 1 ]; then
-    echo "$build_cmd"
-    echo ""
+    printf '%s ' "$@";
+    printf '\n'
   fi
+  "$@" || die "failed to build '$src'!"
 
-  $build_cmd || die "failed to build '$src'!"
+  # Sign
+  echo "Signing  '$out'..."
+  set -- codesign --force --sign 'Apple Development' --entitlements "$entitlements_plist" "$out"
+  if [ $verbose -eq 1 ]; then
+    printf '%s ' "$@"; printf '\n'
+    printf '\n'
+  fi
+  "$@" || die "failed to sign '$out'!"
 done
 
 if [ $run_test -eq 1 -a -f ./build/test ]; then
