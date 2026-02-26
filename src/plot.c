@@ -17,7 +17,7 @@ static const char * const s_plot_vert_src = "                                  \
 layout(location = 0) in float v_point;                                         \
                                                                                \
 uniform int  u_offset;                                                         \
-uniform uint u_points_size_minus_one; /* power of 2 */                         \
+uniform uint u_points_size_minus_one; /* points_size is power of 2 */          \
                                                                                \
 out vec3 col;                                                                  \
                                                                                \
@@ -43,14 +43,74 @@ void main() {                                                                  \
 ";
 
 enum {
-  PLOT_POINTS_COUNT = 1024, // Power of 2
+  PLOT_POINTS_COUNT = 1024,       // Power of 2
 };
 
+// Plot with ring buffer of points
 struct plot {
-  // Ring buffer of points
-  f32 points[PLOT_POINTS_COUNT]; // time
-  u32 end;  // one after last index in points
+  f32 points[PLOT_POINTS_COUNT];  // time
+  u32 end;                        // one after last index in points
 };
+
+struct gl_queries {
+  enum {QUERIES_COUNT = 16};      // Power of 2
+  GLuint queries[QUERIES_COUNT];
+  u64 results[QUERIES_COUNT];     // Ring buffer of query results
+  u32 frame_nums[QUERIES_COUNT];  // Frame number of a query in a ring buffer
+  u32 current;                    // Current query, advanced by query_begin/end
+};
+
+void gl_queries_init(struct gl_queries *qs) {
+  glGenQueries(QUERIES_COUNT, qs->queries);
+}
+
+void gl_queries_shutdown(struct gl_queries *qs) {
+  glDeleteQueries(QUERIES_COUNT, qs->queries);
+}
+
+void gl_queries_query_begin(struct gl_queries *qs, u64 frame_num) {
+  glBeginQuery(GL_TIME_ELAPSED, qs->queries[qs->current]);
+  qs->frame_nums[qs->current] = frame_num;
+}
+void gl_queries_query_end(struct gl_queries *qs) {
+  glEndQuery(GL_TIME_ELAPSED);
+  qs->current = (qs->current + 1) % QUERIES_COUNT;
+}
+
+u64 gl_queries_result(const struct gl_queries *qs, u32 idx) {
+  GLuint64 ret = -1;
+  GLuint available = 0;
+  glGetQueryObjectuiv(qs->queries[idx], GL_QUERY_RESULT_AVAILABLE, &available);
+  if (available) {
+    glGetQueryObjectui64v(qs->queries[idx], GL_QUERY_RESULT, &ret);
+  }
+  return ret;
+}
+
+void gl_queries_poll(struct gl_queries *qs) {
+  for (i32 i = 0; i < QUERIES_COUNT; ++i) {
+    i64 idx = (qs->current + i) % QUERIES_COUNT;
+    u64 res = gl_queries_result(qs, idx);
+    qs->results[idx] = res;
+  }
+}
+
+void gl_queries_debug_print(const struct gl_queries *qs, u64 frame_num) {
+  print_cstr(STDOUT, "Frame #");
+  print_u64(STDOUT, frame_num);
+  print_cstr(STDOUT, ". Queries:\n");
+  for (i32 i = 0; i < QUERIES_COUNT; ++i) {
+    print_cstr(STDOUT, "#");
+    print_u64(STDOUT, i);
+    print_cstr(STDOUT, "\tframe#:");
+    print_u64(STDOUT, qs->frame_nums[i]);
+    print_cstr(STDOUT, "\tresult: ");
+    print_u64(STDOUT, qs->results[i]);
+    print_cstr(STDOUT, " ns,\t");
+    print_f32(STDOUT, qs->results[i] / 1000.0);
+    print_cstr(STDOUT, " us\n");
+  }
+}
 
 void start(void) {
   // Init
@@ -77,7 +137,9 @@ void start(void) {
     s_plot_frag_src
   );
 
-  struct plot plot0 = {0};
+  u32 frame_num = 0;
+
+  struct plot plot_total = {0};
 
   GLuint vao;
   GLuint points_bo;
@@ -94,7 +156,7 @@ void start(void) {
 
   glBindVertexArray(vao);
   glBindBuffer(GL_ARRAY_BUFFER, points_bo);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(plot0.points), plot0.points,
+  glBufferData(GL_ARRAY_BUFFER, sizeof(plot_total.points), plot_total.points,
       GL_STATIC_DRAW);
   glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, 0, 0);
   glEnableVertexAttribArray(0);
@@ -103,6 +165,9 @@ void start(void) {
   GLuint indices[] = { PLOT_POINTS_COUNT - 1, 0 };
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices,
       GL_STATIC_DRAW);
+
+  struct gl_queries qs[1] = {0};
+  gl_queries_init(&qs[0]);
 
   // Game loop
   f32 cpu_timer_freq  = read_cpu_timer_freq();
@@ -164,32 +229,34 @@ void start(void) {
 #endif
 
     // Update plots
-    u32 inserted_idx = plot0.end;
-    plot0.points[plot0.end] = clampf32(dt * 50.0f, 0.0f, 1.0f);
-    plot0.end = (plot0.end + 1) % PLOT_POINTS_COUNT;
+    u32 inserted_idx = plot_total.end;
+    plot_total.points[plot_total.end] = clampf32(dt * 50.0f, 0.0f, 1.0f);
+    plot_total.end = (plot_total.end + 1) % PLOT_POINTS_COUNT;
 
     // Renderer
     glUniform1ui(plot_loc_points_size_minus_one, PLOT_POINTS_COUNT - 1);
 
     // Draw plots
     glBindBuffer(GL_ARRAY_BUFFER, points_bo);
-    i32 subdata_size = sizeof(plot0.points[0]);
+    i32 subdata_size = sizeof(plot_total.points[0]);
     glBufferSubData(GL_ARRAY_BUFFER, inserted_idx * subdata_size, subdata_size,
-        &plot0.points[inserted_idx]);
+        &plot_total.points[inserted_idx]);
 
     // Draw
     glClear(GL_COLOR_BUFFER_BIT);
     glClearColor(0.8f, 0.8f, 0.8f, 0.8f);
 
     // Issue 3 draw calls, for 2 segments and 1 for connection in between
-    u64 size0 = PLOT_POINTS_COUNT - plot0.end;
-    u64 size1 = plot0.end;
+    u64 size0 = PLOT_POINTS_COUNT - plot_total.end;
+    u64 size1 = plot_total.end;
 
     glUniform1i(plot_loc_offset, size0);
 
+    gl_queries_query_begin(&qs[0], frame_num);
+
     // First segment
     glUniform3f(plot_loc_col, 1.0f, 0.0f, 0.5f);
-    glDrawArrays(GL_LINE_STRIP, plot0.end, size0);
+    glDrawArrays(GL_LINE_STRIP, plot_total.end, size0);
 
     // Connect 2 segments
     if (size1 > 0) {
@@ -207,13 +274,27 @@ void start(void) {
     glDrawArrays(GL_POINTS, 0, PLOT_POINTS_COUNT);
 #endif
 
+    gl_queries_query_end(&qs[0]);
+
     window_flush(&w);
+
+    gl_queries_poll(&qs[0]);
+#if 1
+
+    // Debug print qeury results
+    if (frame_num % 16 == 0) {
+      gl_queries_debug_print(&qs[0], frame_num);
+    }
+#endif
+    frame_num += 1;
   }
 
 shutdown:
   print_avg_dt_fps(loop_s / loop_count);
 
   // Shutdown
+  gl_queries_shutdown(&qs[0]);
+
   glDeleteShader(plot_prog);
 
   glDeleteBuffers(1, &points_bo);
