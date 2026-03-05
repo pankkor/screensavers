@@ -1,12 +1,12 @@
 // Draw some plots.
-// Time trace line from a ring buffer Buffer Object
+// Time trace line with fetching Y from GL_TEXTURE_BUFFER
 //
 // Platforms
 //   macOS AArch64
 // Build
 //   ./build.sh
 // Run
-//   ./build/plot
+//   ./build/plot_v_fetch
 
 #include "common.h"
 
@@ -15,18 +15,19 @@
 // --------------------------------------
 static const char * const s_plot_vert_src = "                                  \
 #version 410 core                                                              \
-layout(location = 0) in float v_point;                                         \
                                                                                \
 uniform int u_offset;                                                          \
 uniform int u_points_size_minus_one; /* points_size is power of 2 */           \
+uniform samplerBuffer u_y_buf;                                                 \
                                                                                \
 out vec3 col;                                                                  \
                                                                                \
 void main() {                                                                  \
   int v_id = (gl_VertexID + u_offset) & u_points_size_minus_one;               \
   float dx = 2.0 / u_points_size_minus_one;                                    \
-  float x = -1.0 + dx * v_id;                                                  \
-  gl_Position = vec4(x, v_point * 2.0 - 1.0, 0.0, 1.0);                        \
+  float x = -1.0 + dx * gl_VertexID;                                           \
+  float y = texelFetch(u_y_buf, v_id).r;                                       \
+  gl_Position = vec4(x, y * 2.0 - 1.0, 0.0, 1.0);                              \
 }                                                                              \
 ";
 
@@ -143,31 +144,32 @@ void start(void) {
   struct plot plot_total = {0};
 
   GLuint vao;
-  GLuint points_bo;
-  GLuint points_ebo;
+  GLuint y_bo;
+  GLuint y_tx;
   glGenVertexArrays(1, &vao);
-  glGenBuffers(1, &points_bo);
-  glGenBuffers(1, &points_ebo);
+  glGenBuffers(1, &y_bo);
+  glGenTextures(1, &y_tx);
   GLint plot_loc_col         = glGetUniformLocation(plot_prog, "u_col");
+  GLint plot_loc_y_buf       = glGetUniformLocation(plot_prog, "u_y_buf");
   GLint plot_loc_offset      = glGetUniformLocation(plot_prog, "u_offset");
   GLint plot_loc_points_size_minus_one =
     glGetUniformLocation(plot_prog, "u_points_size_minus_one");
 
-  glUseProgram(plot_prog);
-
   glBindVertexArray(vao);
-  glBindBuffer(GL_ARRAY_BUFFER, points_bo);
-  glBufferData(GL_ARRAY_BUFFER, sizeof(plot_total.points), plot_total.points,
-      GL_STATIC_DRAW);
-  glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, 0, 0);
-  glEnableVertexAttribArray(0);
-
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, points_ebo);
-  GLuint indices[] = { PLOT_POINTS_COUNT - 1, 0 };
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices,
+  glBindBuffer(GL_TEXTURE_BUFFER, y_bo);
+  glBufferData(GL_TEXTURE_BUFFER, sizeof(plot_total.points), plot_total.points,
       GL_STATIC_DRAW);
 
-  struct gl_queries qs[1] = {0};
+  glBindTexture(GL_TEXTURE_BUFFER, y_tx);
+  glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, y_bo);
+
+  glUseProgram(plot_prog);
+  glActiveTexture(GL_TEXTURE0);
+  // TODO: check
+  glBindTexture(GL_TEXTURE_BUFFER, y_tx);
+  glUniform1ui(plot_loc_y_buf, 0);
+
+  struct gl_queries qs[2] = {0};
   gl_queries_init(&qs[0]);
 
   // Game loop
@@ -238,7 +240,7 @@ void start(void) {
     glUniform1i(plot_loc_points_size_minus_one, PLOT_POINTS_COUNT - 1);
 
     // Draw plots
-    glBindBuffer(GL_ARRAY_BUFFER, points_bo);
+    glBindBuffer(GL_ARRAY_BUFFER, y_bo);
     i32 subdata_size = sizeof(plot_total.points[0]);
     glBufferSubData(GL_ARRAY_BUFFER, inserted_idx * subdata_size, subdata_size,
         &plot_total.points[inserted_idx]);
@@ -247,27 +249,16 @@ void start(void) {
     glClearColor(0.8f, 0.8f, 0.8f, 0.8f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    // Issue 3 draw calls, for 2 segments and 1 for connection in between
-    u64 size0 = PLOT_POINTS_COUNT - plot_total.end;
-    u64 size1 = plot_total.end;
+    // TODO
+    // u64 offset = PLOT_POINTS_COUNT - plot_total.end;
+    u64 offset = plot_total.end;
 
-    glUniform1i(plot_loc_offset, size0);
+    glUniform1i(plot_loc_offset, offset);
 
     gl_queries_query_begin(&qs[0], frame_num);
 
-    // First segment
     glUniform3f(plot_loc_col, 1.0f, 0.0f, 0.5f);
-    glDrawArrays(GL_LINE_STRIP, plot_total.end, size0);
-
-    // Connect 2 segments
-    if (size1 > 0) {
-      glDrawElements(GL_LINES, 2, GL_UNSIGNED_INT, 0);
-    }
-
-    // Second segment
-    if (size1 > 1) {
-      glDrawArrays(GL_LINE_STRIP, 0, size1);
-    }
+    glDrawArrays(GL_LINE_STRIP, 0, PLOT_POINTS_COUNT);
 
 #if 1
     glPointSize(2.0f);
@@ -298,7 +289,8 @@ shutdown:
 
   glDeleteShader(plot_prog);
 
-  glDeleteBuffers(1, &points_bo);
+  glDeleteBuffers(1, &y_bo);
+  glDeleteTextures(1, &y_tx);
   glDeleteVertexArrays(1, &vao);
 
   window_shutdown(&w);
