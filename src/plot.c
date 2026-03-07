@@ -15,18 +15,22 @@
 // --------------------------------------
 static const char * const s_plot_vert_src = "                                  \
 #version 410 core                                                              \
-layout(location = 0) in float v_point;                                         \
+layout(location = 0) in float v_y;                                             \
                                                                                \
+uniform float u_y;                                                             \
 uniform int u_offset;                                                          \
 uniform int u_points_size_minus_one; /* points_size is power of 2 */           \
                                                                                \
 out vec3 col;                                                                  \
                                                                                \
+const uint n_plots = 10;                                                       \
+const float y_scale = 1.0 / n_plots;                                           \
+                                                                               \
 void main() {                                                                  \
   int v_id = (gl_VertexID + u_offset) & u_points_size_minus_one;               \
-  float dx = 2.0 / u_points_size_minus_one;                                    \
-  float x = -1.0 + dx * v_id;                                                  \
-  gl_Position = vec4(x, v_point * 2.0 - 1.0, 0.0, 1.0);                        \
+  float x = float(v_id) / u_points_size_minus_one;                             \
+  float y = (u_y + v_y) * y_scale;                                             \
+  gl_Position = vec4(vec2(x, y) * 2.0 - 1.0, 0.0, 1.0);                        \
 }                                                                              \
 ";
 
@@ -148,8 +152,9 @@ void start(void) {
   glGenVertexArrays(1, &vao);
   glGenBuffers(1, &points_bo);
   glGenBuffers(1, &points_ebo);
-  GLint plot_loc_col         = glGetUniformLocation(plot_prog, "u_col");
+  GLint plot_loc_y           = glGetUniformLocation(plot_prog, "u_y");
   GLint plot_loc_offset      = glGetUniformLocation(plot_prog, "u_offset");
+  GLint plot_loc_col         = glGetUniformLocation(plot_prog, "u_col");
   GLint plot_loc_points_size_minus_one =
     glGetUniformLocation(plot_prog, "u_points_size_minus_one");
 
@@ -230,8 +235,9 @@ void start(void) {
 #endif
 
     // Update plots
+#define DT_MAX (1.0f / 100.0f)
     u32 inserted_idx = plot_total.end;
-    plot_total.points[plot_total.end] = clampf32(dt * 50.0f, 0.0f, 1.0f);
+    plot_total.points[plot_total.end] = dt / DT_MAX;
     plot_total.end = (plot_total.end + 1) % PLOT_POINTS_COUNT;
 
     // Renderer
@@ -251,31 +257,37 @@ void start(void) {
     u64 size0 = PLOT_POINTS_COUNT - plot_total.end;
     u64 size1 = plot_total.end;
 
-    glUniform1i(plot_loc_offset, size0);
-
     gl_queries_query_begin(&qs[0], frame_num);
 
-    // First segment
-    glUniform3f(plot_loc_col, 1.0f, 0.0f, 0.5f);
-    glDrawArrays(GL_LINE_STRIP, plot_total.end, size0);
+    // Draw 10 plots
+    for (int i = 0; i < 10; ++i) {
+        glUniform1f(plot_loc_y, (f32)i);
 
-    // Connect 2 segments
-    if (size1 > 0) {
-      glDrawElements(GL_LINES, 2, GL_UNSIGNED_INT, 0);
+        glUniform1i(plot_loc_offset, size0);
+
+        // First segment
+        glUniform3f(plot_loc_col, 0.2f, 0.6f * i * 0.1f, 0.2f);
+        glDrawArrays(GL_LINE_STRIP, plot_total.end, size0);
+
+        // Connect 2 segments
+        if (size1 > 0) {
+          glDrawElements(GL_LINES, 2, GL_UNSIGNED_INT, 0);
+        }
+
+        // Second segment
+        if (size1 > 1) {
+          glDrawArrays(GL_LINE_STRIP, 0, size1);
+        }
+
+    #if 0
+        glPointSize(2.0f);
+        glUniform3f(plot_loc_col, 0.2f, 0.2f, 0.2f);
+        glDrawArrays(GL_POINTS, 0, PLOT_POINTS_COUNT);
+    #endif
     }
-
-    // Second segment
-    if (size1 > 1) {
-      glDrawArrays(GL_LINE_STRIP, 0, size1);
-    }
-
-#if 1
-    glPointSize(2.0f);
-    glUniform3f(plot_loc_col, 0.2f, 0.2f, 0.2f);
-    glDrawArrays(GL_POINTS, 0, PLOT_POINTS_COUNT);
-#endif
 
     gl_queries_query_end(&qs[0]);
+
 
     window_flush(&w);
 
