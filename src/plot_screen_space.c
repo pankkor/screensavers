@@ -23,9 +23,6 @@
 static const char * const s_plot_vert_src = GLSL_V410 "                      \r\
 out vec2 f_uv;                                                               \r\
                                                                              \r\
-const uint n_plots = 10;                                                     \r\
-const float y_scale = 1.0 / n_plots;                                         \r\
-                                                                             \r\
 const vec2 verts[3] = vec2[](                                                \r\
   vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0)                         \r\
 );                                                                           \r\
@@ -41,6 +38,7 @@ void main() {                                                                \r\
 
 static const char * const s_plot_frag_src = GLSL_V410 "                      \r\
 uniform int u_offset;                                                        \r\
+uniform int u_plots_count;                                                   \r\
 uniform int u_points_size_minus_one; /* points_size is power of 2 */         \r\
 uniform float u_izoom; /* inverse zoom */                                    \r\
 uniform float u_scroll;                                                      \r\
@@ -49,7 +47,6 @@ uniform samplerBuffer u_y_buf;                                               \r\
 in vec2 f_uv;                                                                \r\
 out vec4 frag_col;                                                           \r\
                                                                              \r\
-const uint n_plots = 10;                                                     \r\
 const uint n_points = 1024;                                                  \r\
                                                                              \r\
 const vec3 palettes[] = vec3[](                                              \r\
@@ -67,10 +64,11 @@ const vec3 palettes[] = vec3[](                                              \r\
                                                                              \r\
 void main() {                                                                \r\
   uint window = uint(n_points * u_izoom);                                    \r\
-  uint plot_idx = uint(f_uv.t * n_plots);                                    \r\
-  vec4 col = vec4(palettes[plot_idx], 1.0);                                  \r\
+  uint plot_idx = uint(f_uv.t * u_plots_count);                              \r\
+  uint palette_idx = plot_idx % u_plots_count;                               \r\
+  vec4 col = vec4(palettes[palette_idx], 1.0);                               \r\
   int point = (int((f_uv.s + u_scroll) * window));                           \r\
-  float plot = f_uv.t * n_plots;                                             \r\
+  float plot = f_uv.t * u_plots_count;                                       \r\
   float t = 1.0 - fract(plot);                                               \r\
   float y = texelFetch(u_y_buf, point).r;                                    \r\
   if (y < t) {                                                               \r\
@@ -85,7 +83,116 @@ void main() {                                                                \r\
 
 enum {
   PLOT_POINTS_COUNT = 1024,       // Power of 2
+  PLOTS_COUNT = 10,
 };
+
+struct plots_gpu_update {
+  f32 data[PLOTS_COUNT];  // data to be updated for 1 frame
+  u32 frame;              // frame number plots
+};
+
+struct plots_gpu {
+  u32 end;                // GPU ring buffer end index
+  GLuint vao;
+  GLuint y_bo;
+  GLuint y_tx;
+
+  GLuint prog;
+  GLint loc_plots_count;
+  GLint loc_offset;
+  GLint loc_y_buf;
+  GLint loc_izoom;
+  GLint loc_scroll;
+  GLint loc_points_size_minus_one;
+};
+
+void plots_gpu_init(struct plots_gpu *ps) {
+  EXPECT(ps->vao == 0, "plots_gpu is already initialized?");
+  EXPECT(ps->y_bo == 0, "plots_gpu is already initialized?");
+  EXPECT(ps->y_tx == 0, "plots_gpu is already initialized?");
+  glGenVertexArrays(1, &ps->vao);
+  glGenTextures(1, &ps->y_tx);
+  glGenBuffers(1, &ps->y_bo);
+
+  glBindBuffer(GL_ARRAY_BUFFER, ps->y_bo);
+  glBindVertexArray(ps->vao);
+  glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo);
+
+  glBindTexture(GL_TEXTURE_BUFFER, ps->y_tx);
+  glBufferData(GL_ARRAY_BUFFER, GL_R32F * PLOTS_COUNT * PLOT_POINTS_COUNT, 0,
+      GL_STATIC_DRAW);
+  glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, ps->y_bo);
+
+  ps->prog = create_gl_shader_program(
+    s_plot_vert_src,
+    s_plot_frag_src
+  );
+  ps->loc_plots_count = glGetUniformLocation(ps->prog, "u_plots_count");
+  ps->loc_offset      = glGetUniformLocation(ps->prog, "u_offset");
+  ps->loc_y_buf       = glGetUniformLocation(ps->prog, "u_y_buf");
+  ps->loc_izoom       = glGetUniformLocation(ps->prog, "u_izoom");
+  ps->loc_scroll      = glGetUniformLocation(ps->prog, "u_scroll");
+  ps->loc_points_size_minus_one = glGetUniformLocation(ps->prog,
+      "u_points_size_minus_one");
+}
+
+void plots_gpu_shutdown(struct plots_gpu *ps) {
+  glDeleteBuffers(1, &ps->y_bo);
+  glDeleteTextures(1, &ps->y_tx);
+  glDeleteVertexArrays(1, &ps->vao);
+  *ps = (struct plots_gpu){0};
+}
+
+void plots_gpu_bind(const struct plots_gpu *ps) {
+  glBindBuffer(GL_ARRAY_BUFFER, ps->y_bo);
+  glBindVertexArray(ps->vao);
+  glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo);
+  glBindTexture(GL_TEXTURE_BUFFER, ps->y_tx);
+}
+
+void plots_gpu_batch_update(struct plots_gpu *ps,
+    const struct plots_gpu_update *pu) {
+  u32 insert_idx = pu->frame % PLOT_POINTS_COUNT;
+  i32 frame_data_size = sizeof(pu->data);
+
+  glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo); // TODO: shall I bind before?
+  glBufferSubData(GL_ARRAY_BUFFER, insert_idx * frame_data_size, frame_data_size,
+      &pu->data);
+}
+
+// TODO: not tested
+void plots_gpu_partial_update(struct plots_gpu *ps, const f32 v, u32 frame,
+    u32 plot_idx) {
+  u32 insert_idx = frame % PLOT_POINTS_COUNT;
+
+  glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo); // TODO: shall I bind before?
+  glBufferSubData(
+      GL_ARRAY_BUFFER,
+      sizeof(v) * (insert_idx * PLOTS_COUNT + plot_idx),
+      sizeof(v),
+      &v);
+}
+
+struct plots_cpu {
+  u32 current_frame;
+  f32 zoom;
+  f32 scroll;
+};
+
+void plots_gpu_draw(const struct plots_gpu *ps,
+    const struct plots_cpu * ps_cpu) {
+  plots_gpu_bind(ps);
+
+  glUseProgram(ps->prog);
+  glActiveTexture(GL_TEXTURE0);
+
+  glUniform1i(ps->loc_plots_count,  PLOTS_COUNT);
+  glUniform1i(ps->loc_offset,       ps_cpu->current_frame);
+  glUniform1f(ps->loc_izoom,        1.0f / ps_cpu->zoom);
+  glUniform1f(ps->loc_scroll,       ps_cpu->scroll);
+
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
+}
 
 // Plot with ring buffer of points
 struct plot {
@@ -188,6 +295,7 @@ void start(void) {
   glGenVertexArrays(1, &vao);
   glGenBuffers(1, &y_bo);
   glGenTextures(1, &y_tx);
+  GLint plot_loc_plots_count = glGetUniformLocation(plot_prog, "u_plots_count");
   GLint plot_loc_offset      = glGetUniformLocation(plot_prog, "u_offset");
   GLint plot_loc_y_buf       = glGetUniformLocation(plot_prog, "u_y_buf");
   GLint plot_loc_izoom       = glGetUniformLocation(plot_prog, "u_izoom");
@@ -324,6 +432,7 @@ void start(void) {
 
     u64 offset = plot_total.end;
 
+    glUniform1i(plot_loc_plots_count, PLOTS_COUNT);
     glUniform1i(plot_loc_offset,  offset);
     glUniform1f(plot_loc_izoom,   1.0f / points_zoom);
     glUniform1f(plot_loc_scroll,  points_scroll);
