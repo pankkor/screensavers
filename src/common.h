@@ -1654,7 +1654,8 @@ enum KC : u8 {
   KC_RIGHT    = 0x7C,
   KC_DOWN     = 0x7D,
   KC_UP       = 0x7E,
-
+  KC_EQUAL    = 0x18, // = and +
+  KC_MINUS    = 0x1B, // - and _
   KC_SENTINEL, // keep it the biggest value in the enum
 };
 

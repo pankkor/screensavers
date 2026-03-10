@@ -1,48 +1,86 @@
 // Draw some plots.
-// Time trace line with fetching Y from GL_TEXTURE_BUFFER
+// Time trace lines in pixel shader
 //
 // Platforms
 //   macOS AArch64
 // Build
 //   ./build.sh
 // Run
-//   ./build/plot_v_fetch
+//   ./build/plot_screen_space
 
 #include "common.h"
+
+// TODO:
+// - sampleBuffer shall combine multiple plots
+// - remove plot, only uploda 16 floats at a frame
+// - make API
 
 // --------------------------------------
 // GLSL
 // --------------------------------------
-static const char * const s_plot_vert_src = "                                  \
-#version 410 core                                                              \
-                                                                               \
-uniform float u_y;                                                             \
-uniform int u_offset;                                                          \
-uniform int u_points_size_minus_one; /* points_size is power of 2 */           \
-uniform samplerBuffer u_y_buf;                                                 \
-                                                                               \
-const uint n_plots = 10;                                                       \
-const float y_scale = 1.0 / n_plots;                                           \
-                                                                               \
-void main() {                                                                  \
-  int v_id = (gl_VertexID + u_offset) & u_points_size_minus_one;               \
-  float x = float(gl_VertexID) / u_points_size_minus_one;                      \
-  float fetched_y = texelFetch(u_y_buf, v_id).r;                               \
-  float y = (u_y + fetched_y) * y_scale;                                       \
-  gl_Position = vec4(vec2(x, y) * 2.0 - 1.0, 0.0, 1.0);                        \
-}                                                                              \
+#define GLSL_V410 "#version 410 core\n#line " STR(__LINE__) "\n"
+
+static const char * const s_plot_vert_src = GLSL_V410 "                      \r\
+out vec2 f_uv;                                                               \r\
+                                                                             \r\
+const uint n_plots = 10;                                                     \r\
+const float y_scale = 1.0 / n_plots;                                         \r\
+                                                                             \r\
+const vec2 verts[3] = vec2[](                                                \r\
+  vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0)                         \r\
+);                                                                           \r\
+const vec2 uvs[3] = vec2[](                                                  \r\
+  vec2(0.0, 1.0), vec2(2.0, 1.0), vec2(0.0, -1.0)                            \r\
+);                                                                           \r\
+                                                                             \r\
+void main() {                                                                \r\
+  f_uv = vec2(uvs[gl_VertexID]);                                             \r\
+  gl_Position = vec4(verts[gl_VertexID], 0.0, 1.0);                          \r\
+}                                                                            \r\
 ";
 
-static const char * const s_plot_frag_src = "                                  \
-#version 410 core                                                              \
-                                                                               \
-uniform vec3 u_col;                                                            \
-                                                                               \
-out vec4 frag_col;                                                             \
-                                                                               \
-void main() {                                                                  \
-  frag_col = vec4(u_col , 1.0);                                                \
-}                                                                              \
+static const char * const s_plot_frag_src = GLSL_V410 "                      \r\
+uniform int u_offset;                                                        \r\
+uniform int u_points_size_minus_one; /* points_size is power of 2 */         \r\
+uniform float u_izoom; /* inverse zoom */                                    \r\
+uniform float u_scroll;                                                      \r\
+uniform samplerBuffer u_y_buf;                                               \r\
+                                                                             \r\
+in vec2 f_uv;                                                                \r\
+out vec4 frag_col;                                                           \r\
+                                                                             \r\
+const uint n_plots = 10;                                                     \r\
+const uint n_points = 1024;                                                  \r\
+                                                                             \r\
+const vec3 palettes[] = vec3[](                                              \r\
+  vec3(0.59, 0.18, 0.15),                                                    \r\
+  vec3(0.16, 0.44, 0.34),                                                    \r\
+  vec3(0.61, 0.46, 0.15),                                                    \r\
+  vec3(0.13, 0.41, 0.58),                                                    \r\
+  vec3(0.59, 0.30, 0.08),                                                    \r\
+  vec3(0.41, 0.24, 0.50),                                                    \r\
+  vec3(0.12, 0.56, 0.12),                                                    \r\
+  vec3(0.57, 0.38, 0.49),                                                    \r\
+  vec3(0.25, 0.25, 0.25),                                                    \r\
+  vec3(0.00, 0.42, 0.42)                                                     \r\
+);                                                                           \r\
+                                                                             \r\
+void main() {                                                                \r\
+  uint window = uint(n_points * u_izoom);                                    \r\
+  uint plot_idx = uint(f_uv.t * n_plots);                                    \r\
+  vec4 col = vec4(palettes[plot_idx], 1.0);                                  \r\
+  int point = (int((f_uv.s + u_scroll) * window));                           \r\
+  float plot = f_uv.t * n_plots;                                             \r\
+  float t = 1.0 - fract(plot);                                               \r\
+  float y = texelFetch(u_y_buf, point).r;                                    \r\
+  if (y < t) {                                                               \r\
+    col = vec4(0.0, 0.0, 0.0, 0.0);                                          \r\
+  }                                                                          \r\
+  int dpoint = (point - u_offset) & u_points_size_minus_one;                 \r\
+  col.a *= mix(0.5, 1.0, float(dpoint) / n_points);                          \r\
+  col.rgb *= col.a;                                                          \r\
+  frag_col = col;                                                            \r\
+}                                                                            \r\
 ";
 
 enum {
@@ -150,10 +188,10 @@ void start(void) {
   glGenVertexArrays(1, &vao);
   glGenBuffers(1, &y_bo);
   glGenTextures(1, &y_tx);
-  GLint plot_loc_y           = glGetUniformLocation(plot_prog, "u_y");
   GLint plot_loc_offset      = glGetUniformLocation(plot_prog, "u_offset");
   GLint plot_loc_y_buf       = glGetUniformLocation(plot_prog, "u_y_buf");
-  GLint plot_loc_col         = glGetUniformLocation(plot_prog, "u_col");
+  GLint plot_loc_izoom       = glGetUniformLocation(plot_prog, "u_izoom");
+  GLint plot_loc_scroll      = glGetUniformLocation(plot_prog, "u_scroll");
   GLint plot_loc_points_size_minus_one =
     glGetUniformLocation(plot_prog, "u_points_size_minus_one");
 
@@ -169,6 +207,7 @@ void start(void) {
   glActiveTexture(GL_TEXTURE0);
   // TODO: check
   glBindTexture(GL_TEXTURE_BUFFER, y_tx);
+
   glUniform1ui(plot_loc_y_buf, 0);
 
   struct gl_queries qs[2] = {0};
@@ -184,6 +223,9 @@ void start(void) {
   f32 print_dt_tsc    = tsc + 5.0f * cpu_timer_freq;
 
   b32 debug_frame_mode = 0;
+
+  f32 points_zoom     = 1.0f;
+  f32 points_scroll   = 0.0f;
 
   while (1) {
     // Keyboard Input
@@ -217,18 +259,41 @@ void start(void) {
     (void)loop_count;
     (void)print_dt_tsc;
 #endif
+    b32 is_up_space   = keycode_is_up(KC_SPACE, &old_kcs, &kcs);
+    b32 is_up_right   = keycode_is_up(KC_RIGHT, &old_kcs, &kcs);
+    b32 is_up_plus    = keycode_is_up(KC_EQUAL, &old_kcs, &kcs);
+    b32 is_up_minus   = keycode_is_up(KC_MINUS, &old_kcs, &kcs);
+    b32 is_down_shift = keycode_is_down(KC_SHIFT, &old_kcs, &kcs);
+
+    // Zoom and scroll
+    const f32 dzoom   = 0.1f;
+    const f32 dscroll = 0.05f;
+    if (is_down_shift) {
+      // Control zoom with + and -
+      if (is_up_minus) {
+        points_zoom = clampf32(points_zoom - dzoom, 0.1f, 4.0f);
+      }
+      if (is_up_plus) {
+        points_zoom = clampf32(points_zoom + dzoom, 0.1f, 4.0f);
+      }
+    } else {
+      // Control scroll with - and =
+      if (is_up_minus) {
+        points_scroll = clampf32(points_scroll + dscroll, -1.0f, 2.0f);
+      }
+      if (is_up_plus) {
+        points_scroll = clampf32(points_scroll - dscroll, -1.0f, 2.0f);
+      }
+    }
 
 #if 1 // Stop at current frame. Advance 1 frame on Space press
-    b32 is_space_up = keycode_is_up(KC_SPACE, &old_kcs, &kcs);
-    b32 is_right_up = keycode_is_up(KC_RIGHT, &old_kcs, &kcs);
-
-    if (is_space_up) {
+    if (is_up_space) {
       debug_frame_mode = !debug_frame_mode;
       print_cstr(STDOUT, "Debug frame mode: ");
       print_cstr(STDOUT, debug_frame_mode ? "On\n" : "Off\n");
     }
 
-    if (debug_frame_mode && !is_right_up) {
+    if (debug_frame_mode && !is_up_right) {
       continue;
     }
 #endif
@@ -249,31 +314,21 @@ void start(void) {
         &plot_total.points[inserted_idx]);
 
     // Draw
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
     glClearColor(0.8f, 0.8f, 0.8f, 0.8f);
     glClear(GL_COLOR_BUFFER_BIT);
 
     gl_queries_query_begin(&qs[0], frame_num);
 
-    // Draw 10 plots
-    for (int i = 0; i < 10; ++i) {
-        glUniform1f(plot_loc_y, (f32)i);
+    u64 offset = plot_total.end;
 
-        // TODO: it's better when plot doesn't run across the screen
-        // u64 offset = PLOT_POINTS_COUNT - plot_total.end;
-        u64 offset = plot_total.end;
+    glUniform1i(plot_loc_offset,  offset);
+    glUniform1f(plot_loc_izoom,   1.0f / points_zoom);
+    glUniform1f(plot_loc_scroll,  points_scroll);
 
-        glUniform1i(plot_loc_offset, offset);
-
-
-        glUniform3f(plot_loc_col, 0.2f, 0.6f * i * 0.1f, 0.2f);
-        glDrawArrays(GL_LINE_STRIP, 0, PLOT_POINTS_COUNT);
-
-    #if 0
-        glPointSize(2.0f);
-        glUniform3f(plot_loc_col, 0.2f, 0.2f, 0.2f);
-        glDrawArrays(GL_POINTS, 0, PLOT_POINTS_COUNT);
-    #endif
-    }
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
 
     gl_queries_query_end(&qs[0]);
 

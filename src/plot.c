@@ -21,8 +21,6 @@ uniform float u_y;                                                             \
 uniform int u_offset;                                                          \
 uniform int u_points_size_minus_one; /* points_size is power of 2 */           \
                                                                                \
-out vec3 col;                                                                  \
-                                                                               \
 const uint n_plots = 10;                                                       \
 const float y_scale = 1.0 / n_plots;                                           \
                                                                                \
@@ -39,7 +37,6 @@ static const char * const s_plot_frag_src = "                                  \
                                                                                \
 uniform vec3 u_col;                                                            \
                                                                                \
-in vec3 col;                                                                   \
 out vec4 frag_col;                                                             \
                                                                                \
 void main() {                                                                  \
