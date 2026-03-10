@@ -217,8 +217,8 @@ void start(void) {
 #endif
 
 #if 1 // Stop at current frame. Advance 1 frame on Space press
-    b32 is_space_up = keycode_is_up(KC_SPACE, &old_kcs, &kcs);
-    b32 is_right_up = keycode_is_up(KC_RIGHT, &old_kcs, &kcs);
+    b32 is_space_up = keycode_changed_to_up(KC_SPACE, &old_kcs, &kcs);
+    b32 is_right_up = keycode_changed_to_up(KC_RIGHT, &old_kcs, &kcs);
 
     if (is_space_up) {
       debug_frame_mode = !debug_frame_mode;

@@ -47,7 +47,7 @@ uniform samplerBuffer u_y_buf;                                               \r\
 in vec2 f_uv;                                                                \r\
 out vec4 frag_col;                                                           \r\
                                                                              \r\
-const uint n_points = 1024;                                                  \r\
+const int POINTS_MAX = 1024;                                                 \r\
                                                                              \r\
 const vec3 palettes[] = vec3[](                                              \r\
   vec3(0.59, 0.18, 0.15),                                                    \r\
@@ -63,44 +63,63 @@ const vec3 palettes[] = vec3[](                                              \r\
 );                                                                           \r\
                                                                              \r\
 void main() {                                                                \r\
-  uint window = uint(n_points * u_izoom);                                    \r\
-  uint plot_idx = uint(f_uv.t * u_plots_count);                              \r\
-  uint palette_idx = plot_idx % u_plots_count;                               \r\
+  int window = int(POINTS_MAX * u_izoom);                                    \r\
+  int plot_idx = int(f_uv.t * u_plots_count);                                \r\
+  int palette_idx = plot_idx % u_plots_count;                                \r\
   vec4 col = vec4(palettes[palette_idx], 1.0);                               \r\
-  int point = (int((f_uv.s + u_scroll) * window));                           \r\
+  int point = int((f_uv.s + u_scroll) * window);                             \r\
+  int point_in_buf = point * u_plots_count + plot_idx;                       \r\
   float plot = f_uv.t * u_plots_count;                                       \r\
   float t = 1.0 - fract(plot);                                               \r\
-  float y = texelFetch(u_y_buf, point).r;                                    \r\
+  float y = texelFetch(u_y_buf, point_in_buf).r;                             \r\
   if (y < t) {                                                               \r\
     col = vec4(0.0, 0.0, 0.0, 0.0);                                          \r\
   }                                                                          \r\
   int dpoint = (point - u_offset) & u_points_size_minus_one;                 \r\
-  col.a *= mix(0.5, 1.0, float(dpoint) / n_points);                          \r\
+  col.a *= mix(0.4, 1.0, float(dpoint) / POINTS_MAX);                        \r\
   col.rgb *= col.a;                                                          \r\
+  if (t < 0.01) {                                                            \r\
+    /* line */                                                               \r\
+    col = vec4(0.3, 0.3, 0.3, 1.0);                                          \r\
+  }                                                                          \r\
   frag_col = col;                                                            \r\
 }                                                                            \r\
 ";
 
 enum {
   PLOT_POINTS_COUNT = 1024,       // Power of 2
-  PLOTS_COUNT = 10,
+  PLOTS_COUNT = 8,
 };
 
-struct plots_gpu_update {
+struct plots_data_update {
   f32 data[PLOTS_COUNT];  // data to be updated for 1 frame
-  u32 frame;              // frame number plots
+  u32 frame_num;
+};
+
+#define PLOTS_MIN_ZOOM 0.1f
+#define PLOTS_MAX_ZOOM 3.0f
+#define PLOTS_MAX_SCROLL 1.0f
+#define PLOTS_MIN_SCROLL -1.0f
+
+struct plots_state {
+  u32 current_frame_num;
+  f32 dzoom;   // delta zoom,   effective zoom   = 1.0 + dzoom
+  f32 scroll;  //               effective scroll = 0.0 + dscroll
 };
 
 struct plots_gpu {
-  u32 end;                // GPU ring buffer end index
+  struct plots_state state;
+  // Data is streamed to GPU
+
+  // OpenGL
   GLuint vao;
   GLuint y_bo;
   GLuint y_tx;
 
   GLuint prog;
+  GLint loc_y_buf;
   GLint loc_plots_count;
   GLint loc_offset;
-  GLint loc_y_buf;
   GLint loc_izoom;
   GLint loc_scroll;
   GLint loc_points_size_minus_one;
@@ -114,12 +133,10 @@ void plots_gpu_init(struct plots_gpu *ps) {
   glGenTextures(1, &ps->y_tx);
   glGenBuffers(1, &ps->y_bo);
 
-  glBindBuffer(GL_ARRAY_BUFFER, ps->y_bo);
-  glBindVertexArray(ps->vao);
   glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo);
 
   glBindTexture(GL_TEXTURE_BUFFER, ps->y_tx);
-  glBufferData(GL_ARRAY_BUFFER, GL_R32F * PLOTS_COUNT * PLOT_POINTS_COUNT, 0,
+  glBufferData(GL_TEXTURE_BUFFER, GL_R32F * PLOTS_COUNT * PLOT_POINTS_COUNT, 0,
       GL_STATIC_DRAW);
   glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, ps->y_bo);
 
@@ -127,9 +144,10 @@ void plots_gpu_init(struct plots_gpu *ps) {
     s_plot_vert_src,
     s_plot_frag_src
   );
+
+  ps->loc_y_buf       = glGetUniformLocation(ps->prog, "u_y_buf");
   ps->loc_plots_count = glGetUniformLocation(ps->prog, "u_plots_count");
   ps->loc_offset      = glGetUniformLocation(ps->prog, "u_offset");
-  ps->loc_y_buf       = glGetUniformLocation(ps->prog, "u_y_buf");
   ps->loc_izoom       = glGetUniformLocation(ps->prog, "u_izoom");
   ps->loc_scroll      = glGetUniformLocation(ps->prog, "u_scroll");
   ps->loc_points_size_minus_one = glGetUniformLocation(ps->prog,
@@ -137,68 +155,66 @@ void plots_gpu_init(struct plots_gpu *ps) {
 }
 
 void plots_gpu_shutdown(struct plots_gpu *ps) {
+  glDeleteShader(ps->prog);
   glDeleteBuffers(1, &ps->y_bo);
   glDeleteTextures(1, &ps->y_tx);
   glDeleteVertexArrays(1, &ps->vao);
   *ps = (struct plots_gpu){0};
 }
 
-void plots_gpu_bind(const struct plots_gpu *ps) {
-  glBindBuffer(GL_ARRAY_BUFFER, ps->y_bo);
-  glBindVertexArray(ps->vao);
-  glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo);
-  glBindTexture(GL_TEXTURE_BUFFER, ps->y_tx);
+void plots_state_bound(struct plots_state *state) {
+  *state = (struct plots_state){
+    .current_frame_num =  state->current_frame_num % PLOT_POINTS_COUNT,
+    .scroll = clampf32(state->scroll, PLOTS_MIN_SCROLL, PLOTS_MAX_SCROLL),
+    .dzoom  = clampf32(state->dzoom, PLOTS_MIN_ZOOM - 1.0f,
+        PLOTS_MAX_ZOOM - 1.0f),
+  };
 }
 
 void plots_gpu_batch_update(struct plots_gpu *ps,
-    const struct plots_gpu_update *pu) {
-  u32 insert_idx = pu->frame % PLOT_POINTS_COUNT;
+    const struct plots_data_update *pu) {
+  u32 insert_idx = pu->frame_num % PLOT_POINTS_COUNT;
   i32 frame_data_size = sizeof(pu->data);
 
   glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo); // TODO: shall I bind before?
-  glBufferSubData(GL_ARRAY_BUFFER, insert_idx * frame_data_size, frame_data_size,
+  glBufferSubData(
+      GL_TEXTURE_BUFFER,
+      insert_idx * frame_data_size,
+      frame_data_size,
       &pu->data);
 }
 
-// TODO: not tested
-void plots_gpu_partial_update(struct plots_gpu *ps, const f32 v, u32 frame,
-    u32 plot_idx) {
-  u32 insert_idx = frame % PLOT_POINTS_COUNT;
+void plots_gpu_partial_update(struct plots_gpu *ps, u32 plot_idx, const f32 v,
+    u32 frame_num) {
+  u32 insert_idx = frame_num % PLOT_POINTS_COUNT;
 
   glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo); // TODO: shall I bind before?
   glBufferSubData(
-      GL_ARRAY_BUFFER,
+      GL_TEXTURE_BUFFER,
       sizeof(v) * (insert_idx * PLOTS_COUNT + plot_idx),
       sizeof(v),
       &v);
 }
 
-struct plots_cpu {
-  u32 current_frame;
-  f32 zoom;
-  f32 scroll;
-};
-
-void plots_gpu_draw(const struct plots_gpu *ps,
-    const struct plots_cpu * ps_cpu) {
-  plots_gpu_bind(ps);
-
+void plots_gpu_draw(const struct plots_gpu *ps) {
   glUseProgram(ps->prog);
+
+  glBindTexture(GL_TEXTURE_BUFFER, ps->y_tx);
   glActiveTexture(GL_TEXTURE0);
 
-  glUniform1i(ps->loc_plots_count,  PLOTS_COUNT);
-  glUniform1i(ps->loc_offset,       ps_cpu->current_frame);
-  glUniform1f(ps->loc_izoom,        1.0f / ps_cpu->zoom);
-  glUniform1f(ps->loc_scroll,       ps_cpu->scroll);
+  f32 zoom    = 1.0f + ps->state.dzoom;
+  f32 izoom   = 1.0f / zoom;
 
+  glUniform1ui(ps->loc_y_buf,                 0); // sampler buffer 0
+  glUniform1i(ps->loc_plots_count,            PLOTS_COUNT);
+  glUniform1i(ps->loc_offset,                 ps->state.current_frame_num);
+  glUniform1f(ps->loc_izoom,                  izoom);
+  glUniform1f(ps->loc_scroll,                 ps->state.scroll);
+  glUniform1i(ps->loc_points_size_minus_one,  PLOT_POINTS_COUNT - 1);
+
+  glBindVertexArray(ps->vao);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
 }
-
-// Plot with ring buffer of points
-struct plot {
-  f32 points[PLOT_POINTS_COUNT];  // time
-  u32 end;                        // one after last index in points
-};
 
 struct gl_queries {
   enum {QUERIES_COUNT = 16};      // Power of 2
@@ -208,24 +224,24 @@ struct gl_queries {
   u32 current;                    // Current query, advanced by query_begin/end
 };
 
-void gl_queries_init(struct gl_queries *qs) {
+void queries_gpu_init(struct gl_queries *qs) {
   glGenQueries(QUERIES_COUNT, qs->queries);
 }
 
-void gl_queries_shutdown(struct gl_queries *qs) {
+void queries_gpu_shutdown(struct gl_queries *qs) {
   glDeleteQueries(QUERIES_COUNT, qs->queries);
 }
 
-void gl_queries_query_begin(struct gl_queries *qs, u64 frame_num) {
+void queries_gpu_query_begin(struct gl_queries *qs, u64 frame_num) {
   glBeginQuery(GL_TIME_ELAPSED, qs->queries[qs->current]);
   qs->frame_nums[qs->current] = frame_num;
 }
-void gl_queries_query_end(struct gl_queries *qs) {
+void queries_gpu_query_end(struct gl_queries *qs) {
   glEndQuery(GL_TIME_ELAPSED);
   qs->current = (qs->current + 1) % QUERIES_COUNT;
 }
 
-u64 gl_queries_result(const struct gl_queries *qs, u32 idx) {
+u64 queries_gpu_result(const struct gl_queries *qs, u32 idx) {
   GLuint64 ret = -1;
   GLuint available = 0;
   glGetQueryObjectuiv(qs->queries[idx], GL_QUERY_RESULT_AVAILABLE, &available);
@@ -235,15 +251,15 @@ u64 gl_queries_result(const struct gl_queries *qs, u32 idx) {
   return ret;
 }
 
-void gl_queries_poll(struct gl_queries *qs) {
+void queries_gpu_poll(struct gl_queries *qs) {
   for (i32 i = 0; i < QUERIES_COUNT; ++i) {
     i64 idx = (qs->current + i) % QUERIES_COUNT;
-    u64 res = gl_queries_result(qs, idx);
+    u64 res = queries_gpu_result(qs, idx);
     qs->results[idx] = res;
   }
 }
 
-void gl_queries_debug_print(const struct gl_queries *qs, u64 frame_num) {
+void queries_gpu_debug_print(const struct gl_queries *qs, u64 frame_num) {
   print_cstr(STDOUT, "Frame #");
   print_u64(STDOUT, frame_num);
   print_cstr(STDOUT, ". Queries:\n");
@@ -280,46 +296,7 @@ void start(void) {
       "Press <SPACE> to pause/resume at current frame.\n"
       "When paused, press <RIGHT> to advance to the next frame.\n");
 
-  GLuint plot_prog = create_gl_shader_program(
-    s_plot_vert_src,
-    s_plot_frag_src
-  );
-
-  u32 frame_num = 0;
-
-  struct plot plot_total = {0};
-
-  GLuint vao;
-  GLuint y_bo;
-  GLuint y_tx;
-  glGenVertexArrays(1, &vao);
-  glGenBuffers(1, &y_bo);
-  glGenTextures(1, &y_tx);
-  GLint plot_loc_plots_count = glGetUniformLocation(plot_prog, "u_plots_count");
-  GLint plot_loc_offset      = glGetUniformLocation(plot_prog, "u_offset");
-  GLint plot_loc_y_buf       = glGetUniformLocation(plot_prog, "u_y_buf");
-  GLint plot_loc_izoom       = glGetUniformLocation(plot_prog, "u_izoom");
-  GLint plot_loc_scroll      = glGetUniformLocation(plot_prog, "u_scroll");
-  GLint plot_loc_points_size_minus_one =
-    glGetUniformLocation(plot_prog, "u_points_size_minus_one");
-
-  glBindVertexArray(vao);
-  glBindBuffer(GL_TEXTURE_BUFFER, y_bo);
-  glBufferData(GL_TEXTURE_BUFFER, sizeof(plot_total.points), plot_total.points,
-      GL_STATIC_DRAW);
-
-  glBindTexture(GL_TEXTURE_BUFFER, y_tx);
-  glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, y_bo);
-
-  glUseProgram(plot_prog);
-  glActiveTexture(GL_TEXTURE0);
-  // TODO: check
-  glBindTexture(GL_TEXTURE_BUFFER, y_tx);
-
-  glUniform1ui(plot_loc_y_buf, 0);
-
-  struct gl_queries qs[2] = {0};
-  gl_queries_init(&qs[0]);
+  u64 frame_num = 0;
 
   // Game loop
   f32 cpu_timer_freq  = read_cpu_timer_freq();
@@ -332,8 +309,11 @@ void start(void) {
 
   b32 debug_frame_mode = 0;
 
-  f32 points_zoom     = 1.0f;
-  f32 points_scroll   = 0.0f;
+  struct plots_gpu plots = {0};
+  struct gl_queries qs   = {0};
+
+  plots_gpu_init(&plots);
+  queries_gpu_init(&qs);
 
   while (1) {
     // Keyboard Input
@@ -348,13 +328,7 @@ void start(void) {
     }
 
     // dt bookkeeping
-    u64 new_tsc     = read_cpu_timer();
-    f32 dt          = (new_tsc - tsc) * icpu_timer_freq;
-    tsc             = new_tsc;
-    loop_s          += dt;
-    loop_count      += 1;
-
-#if 1 // Print average tick time (print could block io)
+#if 1
     if (tsc > print_dt_tsc) {
       print_avg_dt_fps(loop_s / loop_count);
 
@@ -362,37 +336,42 @@ void start(void) {
       loop_count    = 0;
       print_dt_tsc  = tsc + 5.0f * cpu_timer_freq;
     }
-#else
-    (void)loop_s;
-    (void)loop_count;
-    (void)print_dt_tsc;
 #endif
-    b32 is_up_space   = keycode_is_up(KC_SPACE, &old_kcs, &kcs);
-    b32 is_up_right   = keycode_is_up(KC_RIGHT, &old_kcs, &kcs);
-    b32 is_up_plus    = keycode_is_up(KC_EQUAL, &old_kcs, &kcs);
-    b32 is_up_minus   = keycode_is_up(KC_MINUS, &old_kcs, &kcs);
-    b32 is_down_shift = keycode_is_down(KC_SHIFT, &old_kcs, &kcs);
+    u64 new_tsc     = read_cpu_timer();
+    f32 dt          = (new_tsc - tsc) * icpu_timer_freq;
+    tsc             = new_tsc;
+    loop_s          += dt;
+    loop_count      += 1;
+
+    b32 is_up_space   = keycode_changed_to_up(  KC_SPACE, &old_kcs, &kcs);
+    b32 is_up_right   = keycode_changed_to_up(  KC_RIGHT, &old_kcs, &kcs);
+    b32 is_down_plus  = keycode_changed_to_down(KC_EQUAL, &old_kcs, &kcs);
+    b32 is_down_minus = keycode_changed_to_down(KC_MINUS, &old_kcs, &kcs);
+    b32 is_down_shift = keycode_changed_to_down(KC_SHIFT, &old_kcs, &kcs);
 
     // Zoom and scroll
     const f32 dzoom   = 0.1f;
     const f32 dscroll = 0.05f;
     if (is_down_shift) {
       // Control zoom with + and -
-      if (is_up_minus) {
-        points_zoom = clampf32(points_zoom - dzoom, 0.1f, 4.0f);
+      if (is_down_minus) {
+        plots.state.dzoom -= dzoom;
       }
-      if (is_up_plus) {
-        points_zoom = clampf32(points_zoom + dzoom, 0.1f, 4.0f);
+      if (is_down_plus) {
+        plots.state.dzoom += dzoom;
+
       }
     } else {
       // Control scroll with - and =
-      if (is_up_minus) {
-        points_scroll = clampf32(points_scroll + dscroll, -1.0f, 2.0f);
+      if (is_down_minus) {
+        plots.state.scroll += dscroll;
       }
-      if (is_up_plus) {
-        points_scroll = clampf32(points_scroll - dscroll, -1.0f, 2.0f);
+      if (is_down_plus) {
+        plots.state.scroll -= dscroll;
       }
     }
+    plots.state.current_frame_num = frame_num;
+    plots_state_bound(&plots.state);
 
 #if 1 // Stop at current frame. Advance 1 frame on Space press
     if (is_up_space) {
@@ -406,20 +385,22 @@ void start(void) {
     }
 #endif
 
-    // Update plots
 #define DT_MAX (1.0f / 100.0f)
-    u32 inserted_idx = plot_total.end;
-    plot_total.points[plot_total.end] = dt / DT_MAX;
-    plot_total.end = (plot_total.end + 1) % PLOT_POINTS_COUNT;
-
-    // Renderer
-    glUniform1i(plot_loc_points_size_minus_one, PLOT_POINTS_COUNT - 1);
-
-    // Draw plots
-    glBindBuffer(GL_ARRAY_BUFFER, y_bo);
-    i32 subdata_size = sizeof(plot_total.points[0]);
-    glBufferSubData(GL_ARRAY_BUFFER, inserted_idx * subdata_size, subdata_size,
-        &plot_total.points[inserted_idx]);
+    f32 sdt = dt / DT_MAX;
+    struct plots_data_update plots_upd = {
+      // TODO: fake data
+      .data       = {
+        sdt,                                              // scaled dt
+        0,                                                // draw query
+        loop_s / loop_count * 100,                        // avg fps
+        0,                                                // zero
+        (frame_num % 200) * 0.001,                        // frame number
+        0.5f + 0.5f * sinf32((frame_num % 1000) * 0.01),  // sin
+        (plots.state.scroll + 1.0f),                      // scroll
+        (1.0f + plots.state.dzoom) * 0.25f,               // zoom
+      },
+      .frame_num  = frame_num,
+    };
 
     // Draw
     glEnable(GL_BLEND);
@@ -428,27 +409,29 @@ void start(void) {
     glClearColor(0.8f, 0.8f, 0.8f, 0.8f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    gl_queries_query_begin(&qs[0], frame_num);
+    queries_gpu_query_begin(&qs, frame_num);
 
-    u64 offset = plot_total.end;
+    plots_gpu_batch_update(&plots, &plots_upd);
 
-    glUniform1i(plot_loc_plots_count, PLOTS_COUNT);
-    glUniform1i(plot_loc_offset,  offset);
-    glUniform1f(plot_loc_izoom,   1.0f / points_zoom);
-    glUniform1f(plot_loc_scroll,  points_scroll);
+    // TODO: only stream new queues?
+    for (i32 i = 0; i < QUERIES_COUNT; ++i) {
+      f32 qs_time = qs.results[i] / 1000.0f / 1000.0f;
+      u32 qs_frame = qs.frame_nums[i];
+      plots_gpu_partial_update(&plots, 1, qs_time, qs_frame);
+    }
 
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
+    plots_gpu_draw(&plots);
 
-    gl_queries_query_end(&qs[0]);
+    queries_gpu_query_end(&qs);
 
     window_flush(&w);
 
-    gl_queries_poll(&qs[0]);
+    queries_gpu_poll(&qs);
 #if 1
 
     // Debug print qeury results
     if (frame_num % 16 == 0) {
-      gl_queries_debug_print(&qs[0], frame_num);
+      queries_gpu_debug_print(&qs, frame_num);
     }
 #endif
     frame_num += 1;
@@ -458,13 +441,8 @@ shutdown:
   print_avg_dt_fps(loop_s / loop_count);
 
   // Shutdown
-  gl_queries_shutdown(&qs[0]);
-
-  glDeleteShader(plot_prog);
-
-  glDeleteBuffers(1, &y_bo);
-  glDeleteTextures(1, &y_tx);
-  glDeleteVertexArrays(1, &vao);
+  queries_gpu_shutdown(&qs);
+  plots_gpu_shutdown(&plots);
 
   window_shutdown(&w);
   event_loop_shutdown(&loop);

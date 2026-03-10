@@ -1668,16 +1668,23 @@ struct keycodes {
   enum KC e[KC_SIZE];
 };
 
+b32 keycode_is_up(enum KC kc, struct keycodes *kcs) {
+  return !kcs->e[kc];
+}
+
+b32 keycode_is_down(enum KC kc, struct keycodes *kcs) {
+  return kcs->e[kc];
+}
 // Has keycode changed Down -> Up?
-b32 keycode_is_up(enum KC kc,
+b32 keycode_changed_to_up(enum KC kc,
     struct keycodes *old_kcs, struct keycodes *new_kcs) {
-  return old_kcs->e[kc] && !new_kcs->e[kc];
+  return keycode_is_down(kc, old_kcs) && keycode_is_up(kc, new_kcs);
 }
 
 // Has keycode changed Up -> Down?
-b32 keycode_is_down(enum KC kc,
+b32 keycode_changed_to_down(enum KC kc,
     struct keycodes *old_kcs, struct keycodes *new_kcs) {
-  return old_kcs->e[kc] && !new_kcs->e[kc];
+  return keycode_is_up(kc, old_kcs) && keycode_is_down(kc, new_kcs);
 }
 
 struct event_loop {
