@@ -1,12 +1,11 @@
-// Draw some plots.
-// Time trace lines in pixel shader
+// Draw timeline graphs in pixel shader
 //
 // Platforms
 //   macOS AArch64
 // Build
 //   ./build.sh
 // Run
-//   ./build/plot_screen_space
+//   ./build/timelines
 
 #include "common.h"
 
@@ -15,7 +14,7 @@
 // --------------------------------------
 #define GLSL_V410 "#version 410 core\n#line " STR(__LINE__) "\n"
 
-static const char * const s_plot_vert_src = GLSL_V410 "                      \r\
+static const char * const s_timeline_vert_src = GLSL_V410 "                  \r\
 out vec2 f_uv;                                                               \r\
                                                                              \r\
 const vec2 verts[3] = vec2[](                                                \r\
@@ -31,9 +30,9 @@ void main() {                                                                \r\
 }                                                                            \r\
 ";
 
-static const char * const s_plot_frag_src = GLSL_V410 "                      \r\
+static const char * const s_timeline_frag_src = GLSL_V410 "                  \r\
 uniform int u_offset;                                                        \r\
-uniform int u_plots_count;                                                   \r\
+uniform int u_timelines_count;                                               \r\
 uniform int u_points_size_minus_one; /* points_size is power of 2 */         \r\
 uniform float u_izoom; /* inverse zoom */                                    \r\
 uniform float u_scroll;                                                      \r\
@@ -59,13 +58,13 @@ const vec3 palettes[] = vec3[](                                              \r\
                                                                              \r\
 void main() {                                                                \r\
   int window = int(POINTS_MAX * u_izoom);                                    \r\
-  int plot_idx = int(f_uv.t * u_plots_count);                                \r\
-  int palette_idx = plot_idx % u_plots_count;                                \r\
+  int timeline_idx = int(f_uv.t * u_timelines_count);                        \r\
+  int palette_idx = timeline_idx % u_timelines_count;                        \r\
   vec4 col = vec4(palettes[palette_idx], 1.0);                               \r\
   int point = int((f_uv.s + u_scroll) * window);                             \r\
-  int point_in_buf = point * u_plots_count + plot_idx;                       \r\
-  float plot = f_uv.t * u_plots_count;                                       \r\
-  float t = 1.0 - fract(plot);                                               \r\
+  int point_in_buf = point * u_timelines_count + timeline_idx;               \r\
+  float timeline = f_uv.t * u_timelines_count;                               \r\
+  float t = 1.0 - fract(timeline);                                           \r\
   float y = texelFetch(u_y_buf, point_in_buf).r;                             \r\
   if (y < t) {                                                               \r\
     col = vec4(0.0, 0.0, 0.0, 0.0);                                          \r\
@@ -82,30 +81,39 @@ void main() {                                                                \r\
 ";
 
 enum {
-  PLOT_POINTS_COUNT = 1024, // Power of 2
-  PLOTS_COUNT = 8,
+  TIMELINE_POINTS_COUNT = 1024, // Power of 2
+  TIMELINES_COUNT = 8,
 };
 
-struct plots_data_update {
-  f32 data[PLOTS_COUNT];  // data to be updated for 1 frame
+struct timelines_data_update {
+  f32 data[TIMELINES_COUNT];    // Data to be updated for 1 frame
   u32 frame_num;
 };
 
-#define PLOTS_MIN_ZOOM 0.1f
-#define PLOTS_MAX_ZOOM 3.0f
-#define PLOTS_MAX_SCROLL 1.0f
-#define PLOTS_MIN_SCROLL -1.0f
+#define TIMELINES_MIN_ZOOM 0.1f
+#define TIMELINES_MAX_ZOOM 3.0f
+#define TIMELINES_MAX_SCROLL 1.0f
+#define TIMELINES_MIN_SCROLL -1.0f
 
-struct plots_state {
+struct timelines_state {
   u32 current_frame_num;
   f32 dzoom;   // delta zoom,   effective zoom   = 1.0 + dzoom
   f32 scroll;  //               effective scroll = 0.0 + dscroll
 };
 
-struct plots_gpu {
-  struct plots_state state;
-  // Data is streamed to GPU
+// Clamp to MIN, MAX limits
+void timelines_state_bound(struct timelines_state *state) {
+  *state = (struct timelines_state){
+    .current_frame_num =  state->current_frame_num % TIMELINE_POINTS_COUNT,
+    .scroll = clampf32(state->scroll,
+        TIMELINES_MIN_SCROLL, TIMELINES_MAX_SCROLL),
+    .dzoom  = clampf32(state->dzoom,
+        TIMELINES_MIN_ZOOM - 1.0f, TIMELINES_MAX_ZOOM - 1.0f),
+  };
+}
 
+struct timelines_gpu {
+  // No internal buffer - data is streamed to GPU
   // OpenGL
   GLuint vao;
   GLuint y_bo;
@@ -113,65 +121,57 @@ struct plots_gpu {
 
   GLuint prog;
   GLint loc_y_buf;
-  GLint loc_plots_count;
+  GLint loc_timelines_count;
   GLint loc_offset;
   GLint loc_izoom;
   GLint loc_scroll;
   GLint loc_points_size_minus_one;
 };
 
-void plots_gpu_init(struct plots_gpu *ps) {
-  EXPECT(ps->vao == 0, "plots_gpu is already initialized?");
-  EXPECT(ps->y_bo == 0, "plots_gpu is already initialized?");
-  EXPECT(ps->y_tx == 0, "plots_gpu is already initialized?");
-  glGenVertexArrays(1, &ps->vao);
-  glGenTextures(1, &ps->y_tx);
-  glGenBuffers(1, &ps->y_bo);
+void timelines_gpu_init(struct timelines_gpu *tgs) {
+  EXPECT(tgs->vao == 0, "timelines_gpu is already initialized?");
+  EXPECT(tgs->y_bo == 0, "timelines_gpu is already initialized?");
+  EXPECT(tgs->y_tx == 0, "timelines_gpu is already initialized?");
+  glGenVertexArrays(1, &tgs->vao);
+  glGenTextures(1, &tgs->y_tx);
+  glGenBuffers(1, &tgs->y_bo);
 
-  glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo);
-  glBufferData(GL_TEXTURE_BUFFER, GL_R32F * PLOTS_COUNT * PLOT_POINTS_COUNT, 0,
-      GL_STATIC_DRAW);
+  glBindBuffer(GL_TEXTURE_BUFFER, tgs->y_bo);
+  glBufferData(GL_TEXTURE_BUFFER,
+      GL_R32F * TIMELINES_COUNT * TIMELINE_POINTS_COUNT, 0, GL_STATIC_DRAW);
 
-  glBindTexture(GL_TEXTURE_BUFFER, ps->y_tx);
-  glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, ps->y_bo);
+  glBindTexture(GL_TEXTURE_BUFFER, tgs->y_tx);
+  glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, tgs->y_bo);
 
-  ps->prog = create_gl_shader_program(
-    s_plot_vert_src,
-    s_plot_frag_src
+  tgs->prog = create_gl_shader_program(
+    s_timeline_vert_src,
+    s_timeline_frag_src
   );
 
-  ps->loc_y_buf       = glGetUniformLocation(ps->prog, "u_y_buf");
-  ps->loc_plots_count = glGetUniformLocation(ps->prog, "u_plots_count");
-  ps->loc_offset      = glGetUniformLocation(ps->prog, "u_offset");
-  ps->loc_izoom       = glGetUniformLocation(ps->prog, "u_izoom");
-  ps->loc_scroll      = glGetUniformLocation(ps->prog, "u_scroll");
-  ps->loc_points_size_minus_one = glGetUniformLocation(ps->prog,
-      "u_points_size_minus_one");
+  tgs->loc_y_buf                  = glGetUniformLocation(tgs->prog, "u_y_buf");
+  tgs->loc_offset                 = glGetUniformLocation(tgs->prog, "u_offset");
+  tgs->loc_izoom                  = glGetUniformLocation(tgs->prog, "u_izoom");
+  tgs->loc_scroll                 = glGetUniformLocation(tgs->prog, "u_scroll");
+  tgs->loc_timelines_count        = glGetUniformLocation(
+      tgs->prog, "u_timelines_count");
+  tgs->loc_points_size_minus_one  = glGetUniformLocation(
+      tgs->prog, "u_points_size_minus_one");
 }
 
-void plots_gpu_shutdown(struct plots_gpu *ps) {
-  glDeleteShader(ps->prog);
-  glDeleteBuffers(1, &ps->y_bo);
-  glDeleteTextures(1, &ps->y_tx);
-  glDeleteVertexArrays(1, &ps->vao);
-  *ps = (struct plots_gpu){0};
+void timelines_gpu_shutdown(struct timelines_gpu *tgs) {
+  glDeleteShader(tgs->prog);
+  glDeleteBuffers(1, &tgs->y_bo);
+  glDeleteTextures(1, &tgs->y_tx);
+  glDeleteVertexArrays(1, &tgs->vao);
+  *tgs = (struct timelines_gpu){0};
 }
 
-void plots_state_bound(struct plots_state *state) {
-  *state = (struct plots_state){
-    .current_frame_num =  state->current_frame_num % PLOT_POINTS_COUNT,
-    .scroll = clampf32(state->scroll, PLOTS_MIN_SCROLL, PLOTS_MAX_SCROLL),
-    .dzoom  = clampf32(state->dzoom, PLOTS_MIN_ZOOM - 1.0f,
-        PLOTS_MAX_ZOOM - 1.0f),
-  };
-}
-
-void plots_gpu_batch_update(struct plots_gpu *ps,
-    const struct plots_data_update *pu) {
-  u32 insert_idx = pu->frame_num % PLOT_POINTS_COUNT;
+void timelines_gpu_batch_update(struct timelines_gpu *tgs,
+    const struct timelines_data_update *pu) {
+  u32 insert_idx = pu->frame_num % TIMELINE_POINTS_COUNT;
   i32 frame_data_size = sizeof(pu->data);
 
-  glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo);
+  glBindBuffer(GL_TEXTURE_BUFFER, tgs->y_bo);
   glBufferSubData(
       GL_TEXTURE_BUFFER,
       insert_idx * frame_data_size,
@@ -179,35 +179,36 @@ void plots_gpu_batch_update(struct plots_gpu *ps,
       &pu->data);
 }
 
-void plots_gpu_partial_update(struct plots_gpu *ps, u32 plot_idx, const f32 v,
-    u32 frame_num) {
-  u32 insert_idx = frame_num % PLOT_POINTS_COUNT;
+void timelines_gpu_partial_update(struct timelines_gpu *tgs, u32 timeline_idx,
+    const f32 v, u32 frame_num) {
+  u32 insert_idx = frame_num % TIMELINE_POINTS_COUNT;
 
-  glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo);
+  glBindBuffer(GL_TEXTURE_BUFFER, tgs->y_bo);
   glBufferSubData(
       GL_TEXTURE_BUFFER,
-      sizeof(v) * (insert_idx * PLOTS_COUNT + plot_idx),
+      sizeof(v) * (insert_idx * TIMELINES_COUNT + timeline_idx),
       sizeof(v),
       &v);
 }
 
-void plots_gpu_draw(const struct plots_gpu *ps) {
-  glUseProgram(ps->prog);
+void timelines_gpu_draw(const struct timelines_gpu *tgs,
+    const struct timelines_state *state) {
+  glUseProgram(tgs->prog);
 
-  glBindTexture(GL_TEXTURE_BUFFER, ps->y_tx);
+  glBindTexture(GL_TEXTURE_BUFFER, tgs->y_tx);
   glActiveTexture(GL_TEXTURE0);
 
-  f32 zoom    = 1.0f + ps->state.dzoom;
+  f32 zoom    = 1.0f + state->dzoom;
   f32 izoom   = 1.0f / zoom;
 
-  glUniform1ui(ps->loc_y_buf,                 0); // sampler buffer 0
-  glUniform1i(ps->loc_plots_count,            PLOTS_COUNT);
-  glUniform1i(ps->loc_offset,                 ps->state.current_frame_num);
-  glUniform1f(ps->loc_izoom,                  izoom);
-  glUniform1f(ps->loc_scroll,                 ps->state.scroll);
-  glUniform1i(ps->loc_points_size_minus_one,  PLOT_POINTS_COUNT - 1);
+  glUniform1ui(tgs->loc_y_buf,                 0); // sampler buffer 0
+  glUniform1i(tgs->loc_timelines_count,        TIMELINES_COUNT);
+  glUniform1i(tgs->loc_offset,                 state->current_frame_num);
+  glUniform1f(tgs->loc_izoom,                  izoom);
+  glUniform1f(tgs->loc_scroll,                 state->scroll);
+  glUniform1i(tgs->loc_points_size_minus_one,  TIMELINE_POINTS_COUNT - 1);
 
-  glBindVertexArray(ps->vao);
+  glBindVertexArray(tgs->vao);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
 }
 
@@ -254,12 +255,12 @@ void queries_gpu_poll(struct queries_gpu *qs) {
   }
 }
 
-void plots_gpu_partial_update_queries_gpu(struct plots_gpu *ps, struct queries_gpu *qs,
-    u32 plot_idx) {
+void timelines_gpu_partial_update_queries_gpu(struct timelines_gpu *tgs,
+    struct queries_gpu *qs, u32 timeline_idx) {
   for (i32 i = 0; i < QUERIES_COUNT; ++i) {
     f32 qs_time = qs->results[i] / 1000.0f / 1000.0f;
     u32 qs_frame = qs->frame_nums[i];
-    plots_gpu_partial_update(ps, plot_idx, qs_time, qs_frame);
+    timelines_gpu_partial_update(tgs, timeline_idx, qs_time, qs_frame);
   }
 }
 
@@ -284,7 +285,7 @@ void start(void) {
   // Init
   u64 start_tsc = read_cpu_timer();
   f32 tsc_ifreq = 1.0f / read_cpu_timer_freq();
-  log_init(&g_log, "plot.log", start_tsc, tsc_ifreq);
+  log_init(&g_log, "timeline.log", start_tsc, tsc_ifreq);
 
   struct event_loop loop;
   struct window w;
@@ -313,10 +314,11 @@ void start(void) {
 
   b32 debug_frame_mode = 0;
 
-  struct plots_gpu plots = {0};
+  struct timelines_state timelines_state = {0};
+  struct timelines_gpu timelines = {0};
   struct queries_gpu qs  = {0};
 
-  plots_gpu_init(&plots);
+  timelines_gpu_init(&timelines);
   queries_gpu_init(&qs);
 
   while (1) {
@@ -359,23 +361,23 @@ void start(void) {
     if (is_down_shift) {
       // Control zoom with + and -
       if (is_down_minus) {
-        plots.state.dzoom -= dzoom;
+        timelines_state.dzoom -= dzoom;
       }
       if (is_down_plus) {
-        plots.state.dzoom += dzoom;
+        timelines_state.dzoom += dzoom;
 
       }
     } else {
       // Control scroll with - and =
       if (is_down_minus) {
-        plots.state.scroll += dscroll;
+        timelines_state.scroll += dscroll;
       }
       if (is_down_plus) {
-        plots.state.scroll -= dscroll;
+        timelines_state.scroll -= dscroll;
       }
     }
-    plots.state.current_frame_num = frame_num;
-    plots_state_bound(&plots.state);
+    timelines_state.current_frame_num = frame_num;
+    timelines_state_bound(&timelines_state);
 
 #if 1 // Stop at current frame. Advance 1 frame on Space press
     if (is_up_space) {
@@ -391,17 +393,17 @@ void start(void) {
 
 #define DT_MAX (1.0f / 100.0f)
     f32 sdt = dt / DT_MAX;
-    struct plots_data_update plots_upd = {
+    struct timelines_data_update timelines_upd = {
       // Fake data
       .data       = {
-        sdt,                                              // scaled dt
-        0,                                                // draw query
-        loop_s / loop_count * 100,                        // avg fps
-        0,                                                // zero
-        (frame_num % 200) * 0.001,                        // frame number
-        0.5f + 0.5f * sinf32((frame_num % 1000) * 0.01),  // sin
-        (plots.state.scroll + 1.0f),                      // scroll
-        (1.0f + plots.state.dzoom) * 0.25f,               // zoom
+        sdt,                                              // Scaled dt
+        0,                                                // Draw time (query)
+        loop_s / loop_count * 100,                        // Avg fps
+        0,                                                // Zero
+        (frame_num % 200) * 0.001,                        // Frame number
+        0.5f + 0.5f * sinf32((frame_num % 1000) * 0.01),  // Sin
+        (timelines_state.scroll + 1.0f),                  // Scroll
+        (1.0f + timelines_state.dzoom) * 0.25f,           // Zoom
       },
       .frame_num  = frame_num,
     };
@@ -415,11 +417,11 @@ void start(void) {
 
     queries_gpu_query_begin(&qs, frame_num);
 
-    // stream datat to plots
-    plots_gpu_batch_update(&plots, &plots_upd);
-    plots_gpu_partial_update_queries_gpu(&plots, &qs, 1);
+    // stream datat to timelines
+    timelines_gpu_batch_update(&timelines, &timelines_upd);
+    timelines_gpu_partial_update_queries_gpu(&timelines, &qs, 1);
 
-    plots_gpu_draw(&plots);
+    timelines_gpu_draw(&timelines, &timelines_state);
 
     queries_gpu_query_end(&qs);
 
@@ -441,7 +443,7 @@ shutdown:
 
   // Shutdown
   queries_gpu_shutdown(&qs);
-  plots_gpu_shutdown(&plots);
+  timelines_gpu_shutdown(&timelines);
 
   window_shutdown(&w);
   event_loop_shutdown(&loop);
