@@ -10,11 +10,6 @@
 
 #include "common.h"
 
-// TODO:
-// - sampleBuffer shall combine multiple plots
-// - remove plot, only uploda 16 floats at a frame
-// - make API
-
 // --------------------------------------
 // GLSL
 // --------------------------------------
@@ -87,7 +82,7 @@ void main() {                                                                \r\
 ";
 
 enum {
-  PLOT_POINTS_COUNT = 1024,       // Power of 2
+  PLOT_POINTS_COUNT = 1024, // Power of 2
   PLOTS_COUNT = 8,
 };
 
@@ -134,10 +129,10 @@ void plots_gpu_init(struct plots_gpu *ps) {
   glGenBuffers(1, &ps->y_bo);
 
   glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo);
-
-  glBindTexture(GL_TEXTURE_BUFFER, ps->y_tx);
   glBufferData(GL_TEXTURE_BUFFER, GL_R32F * PLOTS_COUNT * PLOT_POINTS_COUNT, 0,
       GL_STATIC_DRAW);
+
+  glBindTexture(GL_TEXTURE_BUFFER, ps->y_tx);
   glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, ps->y_bo);
 
   ps->prog = create_gl_shader_program(
@@ -176,7 +171,7 @@ void plots_gpu_batch_update(struct plots_gpu *ps,
   u32 insert_idx = pu->frame_num % PLOT_POINTS_COUNT;
   i32 frame_data_size = sizeof(pu->data);
 
-  glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo); // TODO: shall I bind before?
+  glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo);
   glBufferSubData(
       GL_TEXTURE_BUFFER,
       insert_idx * frame_data_size,
@@ -188,7 +183,7 @@ void plots_gpu_partial_update(struct plots_gpu *ps, u32 plot_idx, const f32 v,
     u32 frame_num) {
   u32 insert_idx = frame_num % PLOT_POINTS_COUNT;
 
-  glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo); // TODO: shall I bind before?
+  glBindBuffer(GL_TEXTURE_BUFFER, ps->y_bo);
   glBufferSubData(
       GL_TEXTURE_BUFFER,
       sizeof(v) * (insert_idx * PLOTS_COUNT + plot_idx),
@@ -216,33 +211,34 @@ void plots_gpu_draw(const struct plots_gpu *ps) {
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
 }
 
-struct gl_queries {
+struct queries_gpu {
   enum {QUERIES_COUNT = 16};      // Power of 2
   GLuint queries[QUERIES_COUNT];
-  u64 results[QUERIES_COUNT];     // Ring buffer of query results
   u32 frame_nums[QUERIES_COUNT];  // Frame number of a query in a ring buffer
+  u64 results[QUERIES_COUNT];     // Ring buffer of query results
   u32 current;                    // Current query, advanced by query_begin/end
 };
 
-void queries_gpu_init(struct gl_queries *qs) {
+void queries_gpu_init(struct queries_gpu *qs) {
   glGenQueries(QUERIES_COUNT, qs->queries);
 }
 
-void queries_gpu_shutdown(struct gl_queries *qs) {
+void queries_gpu_shutdown(struct queries_gpu *qs) {
   glDeleteQueries(QUERIES_COUNT, qs->queries);
 }
 
-void queries_gpu_query_begin(struct gl_queries *qs, u64 frame_num) {
+void queries_gpu_query_begin(struct queries_gpu *qs, u64 frame_num) {
   glBeginQuery(GL_TIME_ELAPSED, qs->queries[qs->current]);
+  qs->results[qs->current] = 0;
   qs->frame_nums[qs->current] = frame_num;
 }
-void queries_gpu_query_end(struct gl_queries *qs) {
+void queries_gpu_query_end(struct queries_gpu *qs) {
   glEndQuery(GL_TIME_ELAPSED);
   qs->current = (qs->current + 1) % QUERIES_COUNT;
 }
 
-u64 queries_gpu_result(const struct gl_queries *qs, u32 idx) {
-  GLuint64 ret = -1;
+u64 queries_gpu_result(const struct queries_gpu *qs, u32 idx) {
+  GLuint64 ret = 0;
   GLuint available = 0;
   glGetQueryObjectuiv(qs->queries[idx], GL_QUERY_RESULT_AVAILABLE, &available);
   if (available) {
@@ -251,15 +247,23 @@ u64 queries_gpu_result(const struct gl_queries *qs, u32 idx) {
   return ret;
 }
 
-void queries_gpu_poll(struct gl_queries *qs) {
+void queries_gpu_poll(struct queries_gpu *qs) {
   for (i32 i = 0; i < QUERIES_COUNT; ++i) {
-    i64 idx = (qs->current + i) % QUERIES_COUNT;
-    u64 res = queries_gpu_result(qs, idx);
-    qs->results[idx] = res;
+    u64 res = queries_gpu_result(qs, i);
+    qs->results[i] = res;
   }
 }
 
-void queries_gpu_debug_print(const struct gl_queries *qs, u64 frame_num) {
+void plots_gpu_partial_update_queries_gpu(struct plots_gpu *ps, struct queries_gpu *qs,
+    u32 plot_idx) {
+  for (i32 i = 0; i < QUERIES_COUNT; ++i) {
+    f32 qs_time = qs->results[i] / 1000.0f / 1000.0f;
+    u32 qs_frame = qs->frame_nums[i];
+    plots_gpu_partial_update(ps, plot_idx, qs_time, qs_frame);
+  }
+}
+
+void queries_gpu_debug_print(const struct queries_gpu *qs, u64 frame_num) {
   print_cstr(STDOUT, "Frame #");
   print_u64(STDOUT, frame_num);
   print_cstr(STDOUT, ". Queries:\n");
@@ -310,7 +314,7 @@ void start(void) {
   b32 debug_frame_mode = 0;
 
   struct plots_gpu plots = {0};
-  struct gl_queries qs   = {0};
+  struct queries_gpu qs  = {0};
 
   plots_gpu_init(&plots);
   queries_gpu_init(&qs);
@@ -388,7 +392,7 @@ void start(void) {
 #define DT_MAX (1.0f / 100.0f)
     f32 sdt = dt / DT_MAX;
     struct plots_data_update plots_upd = {
-      // TODO: fake data
+      // Fake data
       .data       = {
         sdt,                                              // scaled dt
         0,                                                // draw query
@@ -411,14 +415,9 @@ void start(void) {
 
     queries_gpu_query_begin(&qs, frame_num);
 
+    // stream datat to plots
     plots_gpu_batch_update(&plots, &plots_upd);
-
-    // TODO: only stream new queues?
-    for (i32 i = 0; i < QUERIES_COUNT; ++i) {
-      f32 qs_time = qs.results[i] / 1000.0f / 1000.0f;
-      u32 qs_frame = qs.frame_nums[i];
-      plots_gpu_partial_update(&plots, 1, qs_time, qs_frame);
-    }
+    plots_gpu_partial_update_queries_gpu(&plots, &qs, 1);
 
     plots_gpu_draw(&plots);
 
