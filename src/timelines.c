@@ -148,7 +148,7 @@ void start(void) {
 
     queries_gpu_query_begin(&qs, frame_num);
 
-    // stream datat to timelines
+    // Stream data to timelines
     timelines_gpu_batch_update(&timelines, &timelines_upd);
     timelines_gpu_partial_update_queries_gpu(&timelines, &qs, 1);
 
