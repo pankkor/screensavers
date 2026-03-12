@@ -9,23 +9,17 @@
 
 #include "common.h"
 
-// --------------------------------------
-// GLSL
-// --------------------------------------
-#define GLSL_V410 "#version 410 core\n#line " STR(__LINE__) "\n"
+// -----------------------------------------------------------------------------
+// Screen space Timelines
+// -----------------------------------------------------------------------------
 
+// 1 full screen triangle
 static const char * const s_timeline_vert_src = GLSL_V410 "                  \r\
-out vec2 f_uv;                                                               \r\
-                                                                             \r\
 const vec2 verts[3] = vec2[](                                                \r\
   vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0)                         \r\
 );                                                                           \r\
-const vec2 uvs[3] = vec2[](                                                  \r\
-  vec2(0.0, 1.0), vec2(2.0, 1.0), vec2(0.0, -1.0)                            \r\
-);                                                                           \r\
                                                                              \r\
 void main() {                                                                \r\
-  f_uv = vec2(uvs[gl_VertexID]);                                             \r\
   gl_Position = vec4(verts[gl_VertexID], 0.0, 1.0);                          \r\
 }                                                                            \r\
 ";
@@ -33,16 +27,16 @@ void main() {                                                                \r\
 static const char * const s_timeline_frag_src = GLSL_V410 "                  \r\
 uniform int u_offset;                                                        \r\
 uniform int u_timelines_count;                                               \r\
-uniform int u_points_size_minus_one; /* points_size is power of 2 */         \r\
+uniform int u_points_count; /* points_count is power of 2 */                 \r\
 uniform float u_izoom; /* inverse zoom */                                    \r\
 uniform float u_scroll;                                                      \r\
-uniform samplerBuffer u_y_buf;                                               \r\
+uniform vec2 u_resolution;                                                   \r\
+/* Point value buffer layout: timelines_count points for frame #N */         \r\
+uniform samplerBuffer u_v_buf; /* p0,p0,..,p0,p1,.. ,p#(timelines_count-1) */\r\
                                                                              \r\
-in vec2 f_uv;                                                                \r\
 out vec4 frag_col;                                                           \r\
                                                                              \r\
 const int POINTS_MAX = 1024;                                                 \r\
-                                                                             \r\
 const vec3 palettes[] = vec3[](                                              \r\
   vec3(0.59, 0.18, 0.15),                                                    \r\
   vec3(0.16, 0.44, 0.34),                                                    \r\
@@ -57,25 +51,24 @@ const vec3 palettes[] = vec3[](                                              \r\
 );                                                                           \r\
                                                                              \r\
 void main() {                                                                \r\
-  int window = int(POINTS_MAX * u_izoom);                                    \r\
-  int timeline_idx = int(f_uv.t * u_timelines_count);                        \r\
-  int palette_idx = timeline_idx % u_timelines_count;                        \r\
+  vec2 st = gl_FragCoord.xy / u_resolution; /* 0->1 */                       \r\
+  float timeline = st.t * u_timelines_count; /* 0->timelines_count */        \r\
+  int timeline_idx = int(timeline);                                          \r\
+  int palette_idx = timeline_idx % palettes.length();                        \r\
   vec4 col = vec4(palettes[palette_idx], 1.0);                               \r\
-  int point = int((f_uv.s + u_scroll) * window);                             \r\
-  int point_in_buf = point * u_timelines_count + timeline_idx;               \r\
-  float timeline = f_uv.t * u_timelines_count;                               \r\
-  float t = 1.0 - fract(timeline);                                           \r\
-  float y = texelFetch(u_y_buf, point_in_buf).r;                             \r\
-  if (y < t) {                                                               \r\
-    col = vec4(0.0, 0.0, 0.0, 0.0);                                          \r\
-  }                                                                          \r\
-  int dpoint = (point - u_offset) & u_points_size_minus_one;                 \r\
-  col.a *= mix(0.4, 1.0, float(dpoint) / POINTS_MAX);                        \r\
-  col.rgb *= col.a;                                                          \r\
-  if (t < 0.01) {                                                            \r\
-    /* line */                                                               \r\
-    col = vec4(0.3, 0.3, 0.3, 1.0);                                          \r\
-  }                                                                          \r\
+  int window = int(u_points_count * u_izoom); /* # points to display */      \r\
+  int p_idx = int((st.s + u_scroll) * window); /* point # */                 \r\
+  int p_idx_in_buf = p_idx * u_timelines_count + timeline_idx;               \r\
+  float f = fract(timeline); /* 0->timelines_count to 0->1, 0->1 .. 0->1 */  \r\
+  float v = texelFetch(u_v_buf, p_idx_in_buf).r;                             \r\
+  float hpx = u_timelines_count / u_resolution.y; /* norm 1 px line height */\r\
+  bool is_in_bounds = p_idx >= 0 && p_idx < u_points_count;                  \r\
+  bool shall_draw_value = v > f || f < hpx; /* draw value or first pixel */  \r\
+  float alpha_mask = float(is_in_bounds && shall_draw_value);                \r\
+  col.a = alpha_mask;  /* erase points not in window and above value */      \r\
+  int dp = (p_idx - u_offset) & u_points_count; /* fade out old points */    \r\
+  col.a *= mix(0.4, 1.0, float(dp) / POINTS_MAX);                            \r\
+  col.rgb *= col.a; /* premultiply alpha */                                  \r\
   frag_col = col;                                                            \r\
 }                                                                            \r\
 ";
@@ -85,11 +78,6 @@ enum {
   TIMELINES_COUNT = 8,
 };
 
-struct timelines_data_update {
-  f32 data[TIMELINES_COUNT];    // Data to be updated for 1 frame
-  u32 frame_num;
-};
-
 #define TIMELINES_MIN_ZOOM 0.1f
 #define TIMELINES_MAX_ZOOM 3.0f
 #define TIMELINES_MAX_SCROLL 1.0f
@@ -97,19 +85,18 @@ struct timelines_data_update {
 
 struct timelines_state {
   u32 current_frame_num;
-  f32 dzoom;   // delta zoom,   effective zoom   = 1.0 + dzoom
-  f32 scroll;  //               effective scroll = 0.0 + dscroll
+  f32 dzoom;          // delta zoom,   effective zoom   = 1.0 + dzoom
+  f32 scroll;         //               effective scroll = 0.0 + dscroll
+  f32 resolution[2];  // screen [width, height]
 };
 
 // Clamp to MIN, MAX limits
 void timelines_state_bound(struct timelines_state *state) {
-  *state = (struct timelines_state){
-    .current_frame_num =  state->current_frame_num % TIMELINE_POINTS_COUNT,
-    .scroll = clampf32(state->scroll,
-        TIMELINES_MIN_SCROLL, TIMELINES_MAX_SCROLL),
-    .dzoom  = clampf32(state->dzoom,
-        TIMELINES_MIN_ZOOM - 1.0f, TIMELINES_MAX_ZOOM - 1.0f),
-  };
+  state->current_frame_num =  state->current_frame_num % TIMELINE_POINTS_COUNT;
+  state->scroll = clampf32(state->scroll,
+        TIMELINES_MIN_SCROLL, TIMELINES_MAX_SCROLL);
+  state->dzoom  = clampf32(state->dzoom,
+        TIMELINES_MIN_ZOOM - 1.0f, TIMELINES_MAX_ZOOM - 1.0f);
 }
 
 struct timelines_gpu {
@@ -125,7 +112,8 @@ struct timelines_gpu {
   GLint loc_offset;
   GLint loc_izoom;
   GLint loc_scroll;
-  GLint loc_points_size_minus_one;
+  GLint loc_points_count;
+  GLint loc_resolution;
 };
 
 void timelines_gpu_init(struct timelines_gpu *tgs) {
@@ -148,14 +136,15 @@ void timelines_gpu_init(struct timelines_gpu *tgs) {
     s_timeline_frag_src
   );
 
-  tgs->loc_y_buf                  = glGetUniformLocation(tgs->prog, "u_y_buf");
-  tgs->loc_offset                 = glGetUniformLocation(tgs->prog, "u_offset");
-  tgs->loc_izoom                  = glGetUniformLocation(tgs->prog, "u_izoom");
-  tgs->loc_scroll                 = glGetUniformLocation(tgs->prog, "u_scroll");
-  tgs->loc_timelines_count        = glGetUniformLocation(
+  tgs->loc_y_buf           = glGetUniformLocation(tgs->prog, "u_v_buf");
+  tgs->loc_offset          = glGetUniformLocation(tgs->prog, "u_offset");
+  tgs->loc_izoom           = glGetUniformLocation(tgs->prog, "u_izoom");
+  tgs->loc_scroll          = glGetUniformLocation(tgs->prog, "u_scroll");
+  tgs->loc_points_count    = glGetUniformLocation( tgs->prog, "u_points_count");
+  tgs->loc_resolution      = glGetUniformLocation(
+      tgs->prog, "u_resolution");
+  tgs->loc_timelines_count = glGetUniformLocation(
       tgs->prog, "u_timelines_count");
-  tgs->loc_points_size_minus_one  = glGetUniformLocation(
-      tgs->prog, "u_points_size_minus_one");
 }
 
 void timelines_gpu_shutdown(struct timelines_gpu *tgs) {
@@ -165,6 +154,35 @@ void timelines_gpu_shutdown(struct timelines_gpu *tgs) {
   glDeleteVertexArrays(1, &tgs->vao);
   *tgs = (struct timelines_gpu){0};
 }
+void timelines_gpu_draw(const struct timelines_gpu *tgs,
+    const struct timelines_state *state) {
+  glUseProgram(tgs->prog);
+
+  glBindTexture(GL_TEXTURE_BUFFER, tgs->y_tx);
+  glActiveTexture(GL_TEXTURE0);
+
+  f32 zoom    = 1.0f + state->dzoom;
+  f32 izoom   = 1.0f / zoom;
+  f32 w       = state->resolution[0];
+  f32 h       = state->resolution[1];
+
+  glUniform1ui(tgs->loc_y_buf,                 0); // sampler buffer 0
+  glUniform1i(tgs->loc_timelines_count,        TIMELINES_COUNT);
+  glUniform1i(tgs->loc_offset,                 state->current_frame_num);
+  glUniform1f(tgs->loc_izoom,                  izoom);
+  glUniform1f(tgs->loc_scroll,                 state->scroll);
+  glUniform1i(tgs->loc_points_count,           TIMELINE_POINTS_COUNT);
+  glUniform2f(tgs->loc_resolution,             w, h);
+
+  glBindVertexArray(tgs->vao);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
+}
+
+// Stream timeline data to GPU. Normalize data values to [0.0, 1.0]
+struct timelines_data_update {
+  f32 data[TIMELINES_COUNT];    // Data to be updated for 1 frame
+  u32 frame_num;
+};
 
 void timelines_gpu_batch_update(struct timelines_gpu *tgs,
     const struct timelines_data_update *pu) {
@@ -191,29 +209,10 @@ void timelines_gpu_partial_update(struct timelines_gpu *tgs, u32 timeline_idx,
       &v);
 }
 
-void timelines_gpu_draw(const struct timelines_gpu *tgs,
-    const struct timelines_state *state) {
-  glUseProgram(tgs->prog);
-
-  glBindTexture(GL_TEXTURE_BUFFER, tgs->y_tx);
-  glActiveTexture(GL_TEXTURE0);
-
-  f32 zoom    = 1.0f + state->dzoom;
-  f32 izoom   = 1.0f / zoom;
-
-  glUniform1ui(tgs->loc_y_buf,                 0); // sampler buffer 0
-  glUniform1i(tgs->loc_timelines_count,        TIMELINES_COUNT);
-  glUniform1i(tgs->loc_offset,                 state->current_frame_num);
-  glUniform1f(tgs->loc_izoom,                  izoom);
-  glUniform1f(tgs->loc_scroll,                 state->scroll);
-  glUniform1i(tgs->loc_points_size_minus_one,  TIMELINE_POINTS_COUNT - 1);
-
-  glBindVertexArray(tgs->vao);
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
-}
-
+// GPU elapesed time queries
 struct queries_gpu {
-  enum {QUERIES_COUNT = 16};      // Power of 2
+  // Number of queries in flight, 1 query per frame
+  enum {QUERIES_COUNT = 4};       // Power of 2
   GLuint queries[QUERIES_COUNT];
   u32 frame_nums[QUERIES_COUNT];  // Frame number of a query in a ring buffer
   u64 results[QUERIES_COUNT];     // Ring buffer of query results
@@ -314,7 +313,10 @@ void start(void) {
 
   b32 debug_frame_mode = 0;
 
-  struct timelines_state timelines_state = {0};
+  struct timelines_state timelines_state = {
+    .resolution = { w.rect[2], w.rect[3] }
+  };
+
   struct timelines_gpu timelines = {0};
   struct queries_gpu qs  = {0};
 
@@ -428,8 +430,8 @@ void start(void) {
     window_flush(&w);
 
     queries_gpu_poll(&qs);
-#if 1
 
+#if 1
     // Debug print qeury results
     if (frame_num % 16 == 0) {
       queries_gpu_debug_print(&qs, frame_num);

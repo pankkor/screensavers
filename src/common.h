@@ -57,6 +57,7 @@ typedef unsigned long int   size_t; // libc compatibility type
   a_ <= b_ ? a_ : b_;                                                          \
 })
 
+#define GLSL_V410 "#version 410 core\n#line " STR(__LINE__) "\n"
 
 INLINE static void debugbreak(void) {
 #if defined(_MSC_VER)
