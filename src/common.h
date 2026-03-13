@@ -2073,23 +2073,23 @@ void timelines_gpu_draw(const struct timelines_gpu *tgs,
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
 }
 
-// Stream timeline data to GPU. Normalize data values to [0.0, 1.0]
-struct timelines_data_update {
+// Stream timeline data to GPU. Values shall be normalized to [0.0, 1.0]
+struct timelines_update_data {
   f32 data[TIMELINES_COUNT];    // Data to be updated for 1 frame
   u32 frame_num;
 };
 
 void timelines_gpu_batch_update(struct timelines_gpu *tgs,
-    const struct timelines_data_update *pu) {
-  u32 insert_idx = pu->frame_num % TIMELINE_POINTS_COUNT;
-  i32 frame_data_size = sizeof(pu->data);
+    const struct timelines_update_data *tupd) {
+  u32 insert_idx = tupd->frame_num % TIMELINE_POINTS_COUNT;
+  i32 frame_data_size = sizeof(tupd->data);
 
   glBindBuffer(GL_TEXTURE_BUFFER, tgs->y_bo);
   glBufferSubData(
       GL_TEXTURE_BUFFER,
       insert_idx * frame_data_size,
       frame_data_size,
-      &pu->data);
+      &tupd->data);
 }
 
 void timelines_gpu_partial_update(struct timelines_gpu *tgs, u32 timeline_idx,

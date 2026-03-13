@@ -124,7 +124,7 @@ void start(void) {
 
 #define DT_MAX (1.0f / 100.0f)
     f32 sdt = dt / DT_MAX;
-    struct timelines_data_update timelines_upd = {
+    struct timelines_update_data timelines_upd = {
       // Fake data
       .data       = {
         sdt,                                              // Scaled dt
