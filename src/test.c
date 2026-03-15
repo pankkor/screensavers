@@ -150,6 +150,19 @@ static void test_math(void) {
     TEST_EXPECT(fetch_add_u32((u32 *)&a + 1, 0x1) == 0xFFFFFFFF);
     TEST_EXPECT(a == 0x00000000FFFFFFFF);
   }
+
+  // Atomic load u32
+  {
+    u32 a = 0xABCDABCD;
+    TEST_EXPECT(atomic_load_u32(&a) == 0xABCDABCD);
+    TEST_EXPECT(a == 0xABCDABCD);
+  }
+  // Atomic load u64
+  {
+    u64 a = 0xABCDABCD01234567;
+    TEST_EXPECT(atomic_load_u64(&a) == 0xABCDABCD01234567);
+    TEST_EXPECT(a == 0xABCDABCD01234567);
+  }
 }
 
 static void test_memory(void) {

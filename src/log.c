@@ -26,12 +26,12 @@ void start(void) {
   u8 msg[TEXT_W * TEXT_H];
 
   f32 bg_anim_t = 0.0f;
-  for (i32 x = 0; x < TEXT_W; ++x) {
-    for (i32 y = 0; y < TEXT_H; ++y) {
+  for (i32 y = 0; y < TEXT_H; ++y) {
+    for (i32 x = 0; x < TEXT_W; ++x) {
       f32 l = 0.25f * cosf32(bg_anim_t + 0.02f * x) + 0.25f;
       f32 k = 0.25f * sinf32(bg_anim_t + 0.02f * y) + 0.25f;
       i32 idx = (l + k) * (ARRAY_COUNT(luminance) - 1);
-      msg[x + TEXT_W * y] = luminance[idx];
+      msg[TEXT_W * y + x] = luminance[idx];
     }
   }
 

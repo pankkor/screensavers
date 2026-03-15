@@ -262,6 +262,28 @@ INLINE static u64 fetch_add_u64(u64 *a, u64 inc) {
   return old;
 }
 
+// Atomic load u32
+INLINE static u32 atomic_load_u32(u32 *a) {
+  u32 ret;
+  __asm__ volatile(
+    "ldar %w[ret], [%[a]]"
+      : [ret] "=r" (ret)
+      : [a] "r" (a)
+  );
+  return ret;
+}
+
+// Atomic load u64
+INLINE static u64 atomic_load_u64(u64 *a) {
+  u64 ret;
+  __asm__ volatile(
+    "ldar %[ret], [%[a]]"
+      : [ret] "=r" (ret)
+      : [a] "r" (a)
+  );
+  return ret;
+}
+
 // -----------------------------------------------------------------------------
 // Time Stamp Counter
 // -----------------------------------------------------------------------------
@@ -1254,7 +1276,7 @@ enum {
   LOG_ALL_BYTES   = LOG_LINES_BYTES + sizeof(((struct log *)0)->atomic),
                                     // Total mmap size
   LOG_LINE_BYTES  = 128,            // Log line size (see 'Correction' above)
-  LOG_LINES       = LOG_LINES_BYTES / LOG_LINE_BYTES, // Number of lines.
+  LOG_LINES       = LOG_LINES_BYTES / LOG_LINE_BYTES, // Number of lines (512)
                                     // Must be power of 2.
   LOG_MESSAGE_SIZE= 71,             // Log message is trimmed to this size
 };
@@ -1371,6 +1393,10 @@ static void log_m(const struct log *log, const char* filename, i32 file_line, i3
   u32 log_line = (fetch_add_u32(log->atomic, 0x10000) >> 16) & (LOG_LINES - 1);
   u8 *dst = log->buf + log_line * LOG_LINE_BYTES;
   mem_cp_aligned32(dst, tmp, 128);
+}
+
+u32 log_atomic_load_current_line(struct log *log) {
+  return (atomic_load_u32(log->atomic) >> 16) & (LOG_LINES - 1);
 }
 
 // Shared logger
