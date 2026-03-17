@@ -360,6 +360,11 @@ INLINE static f32 clampf32(f32 v, f32 lo, f32 hi) {
   return v > hi ? hi : v < lo ? lo : v;
 }
 
+INLINE static i32 clampi32(i32 v, i32 lo, i32 hi) {
+  return v > hi ? hi : v < lo ? lo : v;
+}
+
+
 INLINE static f32 lerpf32(f32 k, f32 x, f32 y) {
   return (1.0f - k) * x + y * k;
 }
@@ -1395,7 +1400,7 @@ static void log_m(const struct log *log, const char* filename, i32 file_line, i3
   mem_cp_aligned32(dst, tmp, 128);
 }
 
-u32 log_atomic_load_current_line(struct log *log) {
+u32 log_atomic_load_last_line(struct log *log) {
   return (atomic_load_u32(log->atomic) >> 16) & (LOG_LINES - 1);
 }
 

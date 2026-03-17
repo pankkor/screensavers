@@ -59,13 +59,13 @@ in vec2 f_uv;                                                                \r\
 in vec4 f_color;                                                             \r\
                                                                              \r\
 uniform sampler2D font_tx;                                                   \r\
-uniform usamplerBuffer u_text_buf;                                           \r\
+uniform usamplerBuffer u_text_buf; /* text ring buffer of size u_buf_size */ \r\
                                                                              \r\
 uniform ivec2 u_buf_window;                                                  \r\
 uniform ivec2 u_buf_size; /* pow of 2 */                                     \r\
 uniform ivec2 u_glyphs_count; /* number of glyphs in atlas row and column */ \r\
 uniform int u_offset_y;                                                      \r\
-uniform int u_line_cur;                                                      \r\
+uniform int u_line_last;                                                     \r\
                                                                              \r\
 out vec4 frag_col;                                                           \r\
                                                                              \r\
@@ -75,16 +75,20 @@ float mask_range(float x, float l, float r) {                                \r\
 }                                                                            \r\
                                                                              \r\
 int mask_range(int x, int l, int r) {                                        \r\
-  return int(step(l, x) * step(x, r));                                       \r\
+  return int(step(l, x) * (1.0 - step(r, x)));                               \r\
 }                                                                            \r\
                                                                              \r\
 void main(void) {                                                            \r\
-  int line_cur = u_line_cur;                                                 \r\
-                                                                             \r\
+  int buf_mod_mask = u_buf_size.y - 1;                                       \r\
   vec2 win_pos = f_uv * u_buf_window;                                        \r\
   ivec2 win_ipos = ivec2(win_pos);                                           \r\
-  /* last line at the bottom of a window */                                  \r\
-  int buf_line = line_cur - u_buf_window.y + win_ipos.y + u_offset_y;        \r\
+                                                                             \r\
+  /* Operate in logical space w/o u_line_last offset (first line at 0) */    \r\
+  /* Offset for - window hight, so last line is at the bottom of a window */ \r\
+  int buf_line = win_ipos.y + u_offset_y + u_buf_size.y - u_buf_window.y;    \r\
+  int mask = mask_range(buf_line, 0, u_buf_size.y);                          \r\
+  /* Move to ring buffer space physical */                                   \r\
+  buf_line = (buf_line + u_line_last) % u_buf_size.y;                        \r\
                                                                              \r\
   int buf_idx = win_ipos.x + buf_line * u_buf_size.x;                        \r\
   uint c = texelFetch(u_text_buf, buf_idx).r;                                \r\
@@ -94,22 +98,12 @@ void main(void) {                                                            \r\
   float a = texture(font_tx, uv).r;                                          \r\
                                                                              \r\
   /* Dim older recent lines */                                               \r\
-  int dist = (buf_line - line_cur) & (u_buf_size.y - 1);                     \r\
-  a *= mix(0.2, 1.0, float(dist) / u_buf_size.y);                            \r\
-                                                                             \r\
+  int dist = (buf_line - u_line_last) & buf_mod_mask;                        \r\
+  a *= mix(0.4, 1.0, float(dist) / u_buf_size.y);                            \r\
+  a *= mask;                                                                 \r\
   frag_col = f_color * a;                                                    \r\
 }                                                                            \r\
 ";
-// TODO:
-  // if (f_uv.x < 0.33) {\r\
-  // frag_col = vec4(vec3(float(buf_line) / 512), 1.0); \r\
-  // } else if (f_uv.x < 0.66) { \r\
-  // frag_col = vec4(vec3(float(line_cur) / 512), 1.0); \r\
-  // } else if (f_uv.x <= 1.0) { \r\
-  // frag_col = buf_line < line_cur ? vec4(0) : vec4(1); \r\
-  // }\r\
-  // buf_line = buf_line < line_cur + u_buf_size.y ? -1 : buf_line;             \r\
-  // buf_line = buf_line > line_cur ? -1 : buf_line;                            \r\
 
 // --------------------------------------
 // Entry point (aka main)
@@ -215,9 +209,11 @@ void start(void) {
       msg[TEXT_W * y + x] = luminance[idx];
     }
   }
-  u32 cur_text_line = 0;
+  u32 text_line = 0;
 
-  u32 log_line_old = log_atomic_load_current_line(&g_log);
+  f32 log_delay = 0;
+  u32 log_line_prev = log_atomic_load_last_line(&g_log);
+  (void)log_line_prev; // TODO:
   i32 offset_y = 0;
 
   while (1) {
@@ -251,9 +247,17 @@ void start(void) {
     }
 
     if (!loop.keycodes.e[KC_SPACE]) {
-      // cur_text_line += 1;
-      // u32 line_in_buf = cur_text_line % TEXT_H;
-      // LOG_M(cur_text_line, (const char*)(msg + TEXT_W * line_in_buf));
+      log_delay += dt;
+      if (log_delay > 0.3f) {
+        log_delay = 0.0f;
+        text_line += 1;
+        u32 line_in_buf = text_line % TEXT_H;
+        if (text_line % 10 == 0) {
+          LOG_M(text_line, "Hold <SPACE> to Pause logging. Use <UP> and <DOWN> to scroll.");
+        } else {
+          LOG_M(text_line, (const char*)(msg + TEXT_W * line_in_buf));
+        }
+      }
     } else {
       if (!loop.keycodes.e[KC_UP]) {
         offset_y += 1;
@@ -262,6 +266,8 @@ void start(void) {
         offset_y -= 1;
       }
     }
+    i32 margin_y = 4;
+    offset_y = clampi32(offset_y, -BUF_H + TEXT_H - margin_y, margin_y);
 
     // Draw
     glEnable(GL_BLEND);
@@ -271,30 +277,30 @@ void start(void) {
     glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
 
     // Update text on the screen
-    u32 log_line_cur = log_atomic_load_current_line(&g_log);
+    u32 log_line_last = log_atomic_load_last_line(&g_log);
 
     glUniform1i(glGetUniformLocation(text_prog, "u_offset_y"), offset_y);
-    glUniform1i(glGetUniformLocation(text_prog, "u_line_cur"), log_line_cur);
+    glUniform1i(glGetUniformLocation(text_prog, "u_line_last"), log_line_last);
 
     // OpenGL can't map buffer
     glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
 
 #if 1
-    // TODO: simply copy all string buffer?
+    // TODO: for now simply copy full string buffer
     glBufferData(GL_TEXTURE_BUFFER, BUF_W * BUF_H, 0, GL_DYNAMIC_DRAW); // Orphan
     glBufferSubData(GL_TEXTURE_BUFFER, 0, BUF_W * BUF_H, g_log.buf);
 #else
-    if (log_line_cur > log_line_old) {
-      u32 dlog_lines = log_line_cur - log_line_old;
+    if (log_line_last > log_line_prev) {
+      u32 dlog_lines = log_line_last - log_line_prev;
       glBufferSubData(GL_TEXTURE_BUFFER,
-          log_line_old * TEXT_W,
+          log_line_prev * TEXT_W,
           dlog_lines * TEXT_W,
           g_log.buf);
     } else {
-      glBufferSubData(GL_TEXTURE_BUFFER, 0, log_line_cur * TEXT_W, g_log.buf);
+      glBufferSubData(GL_TEXTURE_BUFFER, 0, log_line_last * TEXT_W, g_log.buf);
       glBufferSubData(
           GL_TEXTURE_BUFFER,
-          log_line_old * TEXT_W,
+          log_line_prev * TEXT_W,
           TEXT_H * TEXT_W,
           g_log.buf);
     }

@@ -5,6 +5,7 @@
 -Wno-fixed-enum-extension
 -Wno-gnu-statement-expression-from-macro-expansion
 -Wno-unused-function
+-Wno-overlength-strings
 -O0
 -mcpu=native
 -g
