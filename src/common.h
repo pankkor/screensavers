@@ -2080,6 +2080,7 @@ void timelines_gpu_shutdown(struct timelines_gpu *tgs) {
   glDeleteVertexArrays(1, &tgs->vao);
   *tgs = (struct timelines_gpu){0};
 }
+
 void timelines_gpu_draw(const struct timelines_gpu *tgs,
     const struct timelines_state *state) {
   glUseProgram(tgs->prog);

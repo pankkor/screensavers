@@ -10,7 +10,8 @@
 #include "common.h"
 
 #include "res_font_256.h"
-#include "res_ascii_anim.h"
+
+// TODO: make glyps square
 
 enum {
   BUF_W = LOG_LINE_BYTES,
@@ -26,12 +27,9 @@ u32 TEXT_COLOR_RGBA = 0xCFDFFFFF; // 0xRRGGBBAA
 // GLSL
 // --------------------------------------
 static const char * const s_text_vert_src  = GLSL_V410 "                     \r\
-                                                                             \r\
-uniform vec2 u_size;                                                         \r\
-uniform uint u_color; /* RGBA */                                             \r\
+uniform vec2 u_resolution;                                                   \r\
                                                                              \r\
 out vec2 f_uv;                                                               \r\
-out vec4 f_color;                                                            \r\
                                                                              \r\
 const vec2 verts[4] = vec2[](                                                \r\
   vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0), vec2(1.0, 1.0)         \r\
@@ -40,33 +38,28 @@ const vec2 uvs[4] = vec2[](                                                  \r\
   vec2(0.0, 1.0), vec2(1.0, 1.0), vec2(0.0, 0.0), vec2(1.0, 0.0)             \r\
 );                                                                           \r\
                                                                              \r\
-vec4 rgba2vec4(uint rgba) {                                                  \r\
-  return vec4((rgba >> 24) & 0xFFu, (rgba >> 16) & 0xFFu,                    \r\
-    (rgba >> 8) & 0xFFu, rgba & 0xFFu) / 255.0;                              \r\
-}                                                                            \r\
-                                                                             \r\
 void main(void) {                                                            \r\
-  vec2 vert = verts[gl_VertexID] * u_size;                                   \r\
+  float iaspect = u_resolution.y / u_resolution.x;                           \r\
+  vec2 vert = verts[gl_VertexID];                                            \r\
+  vert.x *= iaspect;                                                         \r\
   vec2 uv = uvs[gl_VertexID];                                                \r\
   gl_Position = vec4(vert, 0.0, 1.0);                                        \r\
   f_uv = uv;                                                                 \r\
-  f_color = rgba2vec4(u_color);                                              \r\
 }                                                                            \r\
 ";
 
 static const char * const s_text_frag_src  = GLSL_V410 "                     \r\
-in vec2 f_uv;                                                                \r\
-in vec4 f_color;                                                             \r\
-                                                                             \r\
 uniform sampler2D font_tx;                                                   \r\
 uniform usamplerBuffer u_text_buf; /* text ring buffer of size u_buf_size */ \r\
                                                                              \r\
+uniform uint u_color; /* RGBA */                                             \r\
 uniform ivec2 u_buf_window;                                                  \r\
 uniform ivec2 u_buf_size; /* pow of 2 */                                     \r\
 uniform ivec2 u_glyphs_count; /* number of glyphs in atlas row and column */ \r\
 uniform int u_offset_y;                                                      \r\
 uniform int u_line_last;                                                     \r\
                                                                              \r\
+in vec2 f_uv;                                                                \r\
 out vec4 frag_col;                                                           \r\
                                                                              \r\
 /* Returns 0 if x is outside of [l, r) */                                    \r\
@@ -78,7 +71,13 @@ int mask_range(int x, int l, int r) {                                        \r\
   return int(step(l, x) * (1.0 - step(r, x)));                               \r\
 }                                                                            \r\
                                                                              \r\
+vec4 rgba2vec4(uint rgba) {                                                  \r\
+  return vec4((rgba >> 24) & 0xFFu, (rgba >> 16) & 0xFFu,                    \r\
+    (rgba >> 8) & 0xFFu, rgba & 0xFFu) / 255.0;                              \r\
+}                                                                            \r\
+                                                                             \r\
 void main(void) {                                                            \r\
+  vec4 color = rgba2vec4(u_color);                                           \r\
   int buf_mod_mask = u_buf_size.y - 1;                                       \r\
   vec2 win_pos = f_uv * u_buf_window;                                        \r\
   ivec2 win_ipos = ivec2(win_pos);                                           \r\
@@ -101,7 +100,7 @@ void main(void) {                                                            \r\
   int dist = (buf_line - u_line_last) & buf_mod_mask;                        \r\
   a *= mix(0.4, 1.0, float(dist) / u_buf_size.y);                            \r\
   a *= mask;                                                                 \r\
-  frag_col = f_color * a;                                                    \r\
+  frag_col = color * a;                                                      \r\
 }                                                                            \r\
 ";
 
@@ -174,15 +173,16 @@ void start(void) {
   glBindTexture(GL_TEXTURE_BUFFER, tbo);
   glTexBuffer(GL_TEXTURE_BUFFER, GL_R8UI, text_bo);
 
+  f32 res_w = w.rect[2];
+  f32 res_h = w.rect[3];
   glUniform1i(glGetUniformLocation(text_prog, "font_tx"), 0);
   glUniform1i(glGetUniformLocation(text_prog, "u_text_buf"), 1);
-  glUniform1f(glGetUniformLocation(text_prog, "u_iaspect"), iaspect);
-  glUniform2f(glGetUniformLocation(text_prog, "u_size"), size[0], size[1]);
   glUniform1ui(glGetUniformLocation(text_prog, "u_color"), TEXT_COLOR_RGBA);
   glUniform2i(glGetUniformLocation(text_prog, "u_buf_size"), BUF_W, BUF_H);
   glUniform2i(glGetUniformLocation(text_prog, "u_buf_window"), TEXT_W, TEXT_H);
   glUniform2i(glGetUniformLocation(text_prog, "u_glyphs_count"), FONT_GLYPHS_W,
       FONT_GLYPHS_H);
+  glUniform2f(glGetUniformLocation(text_prog, "u_resolution"), res_w, res_h);
 
   // Logic
 
@@ -286,22 +286,25 @@ void start(void) {
     glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
 
 #if 1
-    // TODO: for now simply copy full string buffer
-    glBufferData(GL_TEXTURE_BUFFER, BUF_W * BUF_H, 0, GL_DYNAMIC_DRAW); // Orphan
+    // Copy all strings for simplicity
+    // Orphan buffer
+    glBufferData(GL_TEXTURE_BUFFER, BUF_W * BUF_H, 0, GL_DYNAMIC_DRAW);
     glBufferSubData(GL_TEXTURE_BUFFER, 0, BUF_W * BUF_H, g_log.buf);
 #else
+    // Copy only changed strings
     if (log_line_last > log_line_prev) {
       u32 dlog_lines = log_line_last - log_line_prev;
       glBufferSubData(GL_TEXTURE_BUFFER,
-          log_line_prev * TEXT_W,
-          dlog_lines * TEXT_W,
+          log_line_prev * BUF_W,
+          dlog_lines * BUF_W,
           g_log.buf);
     } else {
       glBufferSubData(GL_TEXTURE_BUFFER, 0, log_line_last * TEXT_W, g_log.buf);
+      u32 dlog_lines = BUF_H - log_line_last;
       glBufferSubData(
           GL_TEXTURE_BUFFER,
           log_line_prev * TEXT_W,
-          TEXT_H * TEXT_W,
+          dlog_lines * BUF_W,
           g_log.buf);
     }
 #endif
