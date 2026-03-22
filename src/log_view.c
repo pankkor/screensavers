@@ -11,8 +11,6 @@
 
 #include "res_font_256.h"
 
-// TODO: make glyps square
-
 enum {
   BUF_W = LOG_LINE_BYTES,
   BUF_H = LOG_LINES,
@@ -26,15 +24,18 @@ u32 TEXT_COLOR_RGBA = 0xCFDFFFFF; // 0xRRGGBBAA
 static const char * const s_text_vert_src  = GLSL_V410 "                     \r\
 uniform vec2 u_resolution;                                                   \r\
 uniform vec4 u_rect;                                                         \r\
+uniform ivec2 u_buf_window;                                                  \r\
+uniform ivec2 u_offset;                                                      \r\
                                                                              \r\
-out vec2 f_uv;                                                               \r\
+out vec2 f_win_pos;                                                          \r\
                                                                              \r\
 void main(void) {                                                            \r\
   vec2 v = vec2(gl_VertexID & 1, (gl_VertexID >> 1) & 1);                    \r\
   vec2 uv = vec2(v.x, 1.0 - v.y);                                            \r\
   vec2 vert = (u_rect.xy + v * u_rect.zw) / u_resolution; /* in [0, 1] */    \r\
   vec2 ndc = (2.0 * vert - 1.0); /* in [-1, 1] */                            \r\
-  f_uv = uv;                                                                 \r\
+                                                                             \r\
+  f_win_pos = uv * u_buf_window + u_offset;                                  \r\
   gl_Position = vec4(ndc, 0.0, 1.0);                                         \r\
 }                                                                            \r\
 ";
@@ -47,15 +48,10 @@ uniform vec4 u_rect;                                                         \r\
 uniform uint u_color; /* RGBA */                                             \r\
 uniform ivec2 u_buf_size; /* pow of 2 */                                     \r\
 uniform ivec2 u_glyphs_count; /* number of glyphs in atlas row and column */ \r\
-uniform ivec2 u_offset;                                                      \r\
 uniform int u_line_last;                                                     \r\
 uniform ivec2 u_buf_window;                                                  \r\
                                                                              \r\
-// TODO: this is calculated on CPU and we are provided buf_window instead       \r\
-// uniform vec2 u_glyph_size; [> size of glyph in pixels <]                     \r\
-// uniform float u_zoom;                                                        \r\
-                                                                             \r\
-in vec2 f_uv;                                                                \r\
+in vec2 f_win_pos;                                                           \r\
 out vec4 frag_col;                                                           \r\
                                                                              \r\
 /* Returns 0 if x is outside of [l, r) */                                    \r\
@@ -71,12 +67,8 @@ vec4 rgba2vec4(uint rgba) {                                                  \r\
 void main(void) {                                                            \r\
   vec4 color = rgba2vec4(u_color);                                           \r\
   int buf_mod_mask = u_buf_size.y - 1;                                       \r\
-  // TODO: this is calculated on CPU and we are provided buf_window instead     \r\
-  // float glyph_scale = u_zoom * u_rect.z / u_buf_size.x / u_glyph_size.x;     \r\
-  // vec2 glyph_size = u_glyph_size * glyph_scale;                              \r\
-  // ivec2 buf_window = ivec2(u_rect.zw / glyph_size);                          \r\
                                                                              \r\
-  vec2 win_pos = f_uv * u_buf_window + u_offset;                             \r\
+  vec2 win_pos = f_win_pos;                                                  \r\
                                                                              \r\
   /* Operate in logical space w/o u_line_last offset (first line at 0) */    \r\
   /* Offset for - window hight, so last line is at the bottom of a window */ \r\
@@ -100,7 +92,6 @@ void main(void) {                                                            \r\
   a *= mix(0.4, 1.0, float(dist) / u_buf_size.y);                            \r\
   a *= mask;                                                                 \r\
   frag_col = color * a;                                                      \r\
-  if (a - 0.01 < 0.0) { frag_col = vec4(1,0,0,1); }                          \r\
 }                                                                            \r\
 ";
 
@@ -173,9 +164,7 @@ void start(void) {
   glBindTexture(GL_TEXTURE_BUFFER, tbo);
   glTexBuffer(GL_TEXTURE_BUFFER, GL_R8UI, text_bo);
 
-  // TODO:
-  // f32 rect[4] = {0, 0, w.rect[2], w.rect[3]};
-  f32 rect[4] = {100, 100, w.rect[2] - 200, w.rect[3] - 200};
+  f32 rect[4] = {0, 0, w.rect[2], w.rect[3]};
   f32 glyph_size[2] = {(f32)FONT_TX_W / FONT_GLYPHS_W, (f32)FONT_TX_H / FONT_GLYPHS_H};
 
   glUniform1i(glGetUniformLocation(text_prog, "font_tx"), 0);
@@ -286,7 +275,7 @@ void start(void) {
       }
     }
 
-    i32 margin = 4;
+    i32 margin = 0;
     dzoom = clampf32(dzoom, -0.5f, 0.5f);
     f32 zoom = 1.0f + dzoom;
 
@@ -316,10 +305,6 @@ void start(void) {
     glUniform1i(glGetUniformLocation(text_prog, "u_line_last"), log_line_last);
     glUniform2i(glGetUniformLocation(text_prog, "u_buf_window"), buf_win[0],
         buf_win[1]);
-    // TODO: this is calculated on CPU in order to keep bounds for input
-    // glUniform2f(glGetUniformLocation(text_prog, "u_glyph_size"), glyph_size[0],
-      // glyph_size[1]);
-    // glUniform1f(glGetUniformLocation(text_prog, "u_zoom"), zoom);
 
     // OpenGL can't map buffer
     glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
