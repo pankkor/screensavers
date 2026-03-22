@@ -33,7 +33,7 @@ void main(void) {                                                            \r\
   vec2 v = vec2(gl_VertexID & 1, (gl_VertexID >> 1) & 1);                    \r\
   vec2 uv = vec2(v.x, 1.0 - v.y);                                            \r\
   vec2 vert = (u_rect.xy + v * u_rect.zw) / u_resolution; /* in [0, 1] */    \r\
-  vec2 ndc = (2.0 * vert - 1.0); /* in [-1, 1] */                            \r\
+  vec2 ndc = 2.0 * vert - 1.0; /* in [-1, 1] */                              \r\
                                                                              \r\
   f_win_pos = uv * u_buf_window + u_offset;                                  \r\
   gl_Position = vec4(ndc, 0.0, 1.0);                                         \r\
@@ -174,7 +174,6 @@ void start(void) {
   glUniform2i(glGetUniformLocation(text_prog, "u_glyphs_count"), FONT_GLYPHS_W,
       FONT_GLYPHS_H);
   glUniform2f(glGetUniformLocation(text_prog, "u_resolution"), w.rect[2], w.rect[3]);
-  glUniform4f(glGetUniformLocation(text_prog, "u_rect"), rect[0], rect[1], rect[2], rect[3]);
 
   // Logic
 
@@ -203,14 +202,15 @@ void start(void) {
       msg[BUF_W * y + x] = luminance[idx];
     }
   }
-  u32 text_line     = 0;
+  u32 text_line         = 0;
 
-  f32 log_delay     = 0;
-  u32 log_line_prev = log_atomic_load_last_line(&g_log);
+  f32 log_delay         = 0;
+  u32 log_line_prev     = log_atomic_load_last_line(&g_log);
   (void)log_line_prev; // TODO:
 
-  i32 offset[2]     = {0};
-  f32 dzoom         = 0.0f;
+  i32 offset[2]         = {0};
+  f32 dzoom             = 0.0f;
+  b32 is_log_view_snown = 1;
 
   while (1) {
     // dt bookkeeping
@@ -235,42 +235,55 @@ void start(void) {
 #endif
     // Keyboard Input
     // Step through event loop once, updating input events
+    struct keycodes old_kcs = loop.keycodes;
     event_loop_step(&loop);
+    struct keycodes kcs = loop.keycodes;
 
     // ESC to exit
-    if (loop.keycodes.e[KC_ESC]) {
+    if (kcs.e[KC_ESC]) {
       goto shutdown;
     }
 
-    if (!loop.keycodes.e[KC_SPACE]) {
+    b32 is_up_grave = keycode_changed_to_up(KC_GRAVE, &old_kcs, &kcs);
+    if (is_up_grave) {
+      is_log_view_snown = !is_log_view_snown;
+    }
+
+    if (is_log_view_snown) {
+      rect[1] = MAX(rect[1] - 7000.0f * dt, 0.0f);
+    } else {
+      rect[1] = MIN(rect[1] + 7000.0f * dt, rect[3]);
+    }
+
+    if (!kcs.e[KC_SPACE]) {
       log_delay += dt;
-      if (log_delay > 0.3f) {
+      if (log_delay > 0.2f) {
         log_delay = 0.0f;
         text_line += 1;
         u32 line_in_buf = text_line % BUF_H;
-        if (text_line % 10 == 0) {
+        if (text_line % 20 == 0) {
           LOG_M(text_line, "Hold <SPACE> to Pause logging. Use <UP> and <DOWN> to scroll.");
         } else {
           LOG_M(text_line, (const char*)(msg + BUF_W * line_in_buf));
         }
       }
     } else {
-      if (loop.keycodes.e[KC_LEFT]) {
+      if (kcs.e[KC_LEFT]) {
         offset[0] -= 1;
       }
-      if (loop.keycodes.e[KC_RIGHT]) {
+      if (kcs.e[KC_RIGHT]) {
         offset[0] += 1;
       }
-      if (loop.keycodes.e[KC_UP]) {
+      if (kcs.e[KC_UP]) {
         offset[1] -= 1;
       }
-      if (loop.keycodes.e[KC_DOWN]) {
+      if (kcs.e[KC_DOWN]) {
         offset[1] += 1;
       }
-      if (loop.keycodes.e[KC_EQUAL]) {
+      if (kcs.e[KC_EQUAL]) {
         dzoom += 0.01;
       }
-      if (loop.keycodes.e[KC_MINUS]) {
+      if (kcs.e[KC_MINUS]) {
         dzoom -= 0.01;
       }
     }
@@ -300,6 +313,7 @@ void start(void) {
     // Update text on the screen
     u32 log_line_last = log_atomic_load_last_line(&g_log);
 
+    glUniform4f(glGetUniformLocation(text_prog, "u_rect"), rect[0], rect[1], rect[2], rect[3]);
     glUniform2i(glGetUniformLocation(text_prog, "u_offset"), offset[0],
         offset[1]);
     glUniform1i(glGetUniformLocation(text_prog, "u_line_last"), log_line_last);

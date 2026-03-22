@@ -1681,9 +1681,12 @@ static i32 window_flush(struct window *w) {
 // #include <Carbon/Carbon.h>
 // and go to definition of kVK_Escape
 enum KC : u8 {
+  KC_EQUAL    = 0x18, // = and +
+  KC_MINUS    = 0x1B, // - and _
   KC_RET      = 0x24,
   KC_TAB      = 0x30,
   KC_SPACE    = 0x31,
+  KC_GRAVE    = 0x32, // ` and ~
   KC_DEL      = 0x33,
   KC_ESC      = 0x35,
   KC_COMMAND  = 0x37,
@@ -1695,8 +1698,6 @@ enum KC : u8 {
   KC_RIGHT    = 0x7C,
   KC_DOWN     = 0x7D,
   KC_UP       = 0x7E,
-  KC_EQUAL    = 0x18, // = and +
-  KC_MINUS    = 0x1B, // - and _
   KC_SENTINEL, // keep it the biggest value in the enum
 };
 
