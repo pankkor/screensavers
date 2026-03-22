@@ -16,9 +16,6 @@
 enum {
   BUF_W = LOG_LINE_BYTES,
   BUF_H = LOG_LINES,
-  TEXT_W = LOG_LINE_BYTES,
-  TEXT_H = 80,
-  TEXTS_COUNT = 1,
 };
 
 u32 TEXT_COLOR_RGBA = 0xCFDFFFFF; // 0xRRGGBBAA
@@ -28,23 +25,17 @@ u32 TEXT_COLOR_RGBA = 0xCFDFFFFF; // 0xRRGGBBAA
 // --------------------------------------
 static const char * const s_text_vert_src  = GLSL_V410 "                     \r\
 uniform vec2 u_resolution;                                                   \r\
+uniform vec4 u_rect;                                                         \r\
                                                                              \r\
 out vec2 f_uv;                                                               \r\
                                                                              \r\
-const vec2 verts[4] = vec2[](                                                \r\
-  vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0), vec2(1.0, 1.0)         \r\
-);                                                                           \r\
-const vec2 uvs[4] = vec2[](                                                  \r\
-  vec2(0.0, 1.0), vec2(1.0, 1.0), vec2(0.0, 0.0), vec2(1.0, 0.0)             \r\
-);                                                                           \r\
-                                                                             \r\
 void main(void) {                                                            \r\
-  float iaspect = u_resolution.y / u_resolution.x;                           \r\
-  vec2 vert = verts[gl_VertexID];                                            \r\
-  vert.x *= iaspect;                                                         \r\
-  vec2 uv = uvs[gl_VertexID];                                                \r\
-  gl_Position = vec4(vert, 0.0, 1.0);                                        \r\
+  vec2 v = vec2(gl_VertexID & 1, (gl_VertexID >> 1) & 1);                    \r\
+  vec2 uv = vec2(v.x, 1.0 - v.y);                                            \r\
+  vec2 vert = (u_rect.xy + v * u_rect.zw) / u_resolution; /* in [0, 1] */    \r\
+  vec2 ndc = (2.0 * vert - 1.0); /* in [-1, 1] */                            \r\
   f_uv = uv;                                                                 \r\
+  gl_Position = vec4(ndc, 0.0, 1.0);                                         \r\
 }                                                                            \r\
 ";
 
@@ -52,23 +43,23 @@ static const char * const s_text_frag_src  = GLSL_V410 "                     \r\
 uniform sampler2D font_tx;                                                   \r\
 uniform usamplerBuffer u_text_buf; /* text ring buffer of size u_buf_size */ \r\
                                                                              \r\
+uniform vec4 u_rect;                                                         \r\
 uniform uint u_color; /* RGBA */                                             \r\
 uniform ivec2 u_buf_window;                                                  \r\
 uniform ivec2 u_buf_size; /* pow of 2 */                                     \r\
 uniform ivec2 u_glyphs_count; /* number of glyphs in atlas row and column */ \r\
-uniform int u_offset_y;                                                      \r\
+uniform ivec2 u_offset;                                                       \r\
 uniform int u_line_last;                                                     \r\
                                                                              \r\
 in vec2 f_uv;                                                                \r\
 out vec4 frag_col;                                                           \r\
                                                                              \r\
 /* Returns 0 if x is outside of [l, r) */                                    \r\
-float mask_range(float x, float l, float r) {                                \r\
-  return step(l, x) * step(x, r);                                            \r\
-}                                                                            \r\
-                                                                             \r\
 int mask_range(int x, int l, int r) {                                        \r\
   return int(step(l, x) * (1.0 - step(r, x)));                               \r\
+}                                                                            \r\
+float mask_range(float x, float l, float r) {                                \r\
+  return step(l, x) * (1.0 - step(r, x));                                    \r\
 }                                                                            \r\
                                                                              \r\
 vec4 rgba2vec4(uint rgba) {                                                  \r\
@@ -79,17 +70,24 @@ vec4 rgba2vec4(uint rgba) {                                                  \r\
 void main(void) {                                                            \r\
   vec4 color = rgba2vec4(u_color);                                           \r\
   int buf_mod_mask = u_buf_size.y - 1;                                       \r\
-  vec2 win_pos = f_uv * u_buf_window;                                        \r\
+  vec2 glyph_pxs = vec2(16, 16);                                             \r\
+  // TODO:                                                                   \r\
+  // ivec2 buf_window = ivec2(u_rect.zw / glyph_pxs);                        \r\
+  ivec2 buf_window = u_buf_window;                                           \r\
+  vec2 win_pos = f_uv * buf_window + u_offset;                               \r\
   ivec2 win_ipos = ivec2(win_pos);                                           \r\
                                                                              \r\
   /* Operate in logical space w/o u_line_last offset (first line at 0) */    \r\
   /* Offset for - window hight, so last line is at the bottom of a window */ \r\
-  int buf_line = win_ipos.y + u_offset_y + u_buf_size.y - u_buf_window.y;    \r\
-  int mask = mask_range(buf_line, 0, u_buf_size.y);                          \r\
+  int buf_row = win_ipos.x;                                     \r\
+  float buf_linef = win_ipos.y + u_buf_size.y - buf_window.y;      \r\
+  float mask_x = mask_range(win_pos.x, 0.0, float(u_buf_size.x));                         \r\
+  float mask_y = mask_range(buf_linef, 0.0, float(u_buf_size.y));                        \r\
+  float mask = mask_x * mask_y;                                                \r\
   /* Move to ring buffer space physical */                                   \r\
-  buf_line = (buf_line + u_line_last) % u_buf_size.y;                        \r\
+  int buf_line = (int(buf_linef) + u_line_last) & buf_mod_mask;              \r\
                                                                              \r\
-  int buf_idx = win_ipos.x + buf_line * u_buf_size.x;                        \r\
+  int buf_idx = buf_row + buf_line * u_buf_size.x;                           \r\
   uint c = texelFetch(u_text_buf, buf_idx).r;                                \r\
                                                                              \r\
   vec2 glyph_pos = vec2(c % u_glyphs_count.x, c / u_glyphs_count.y);         \r\
@@ -101,6 +99,7 @@ void main(void) {                                                            \r\
   a *= mix(0.4, 1.0, float(dist) / u_buf_size.y);                            \r\
   a *= mask;                                                                 \r\
   frag_col = color * a;                                                      \r\
+  if (a - 0.01 < 0.0) { frag_col = vec4(1,0,0,1); }                            \r\
 }                                                                            \r\
 ";
 
@@ -179,10 +178,12 @@ void start(void) {
   glUniform1i(glGetUniformLocation(text_prog, "u_text_buf"), 1);
   glUniform1ui(glGetUniformLocation(text_prog, "u_color"), TEXT_COLOR_RGBA);
   glUniform2i(glGetUniformLocation(text_prog, "u_buf_size"), BUF_W, BUF_H);
-  glUniform2i(glGetUniformLocation(text_prog, "u_buf_window"), TEXT_W, TEXT_H);
+  glUniform2i(glGetUniformLocation(text_prog, "u_buf_window"), BUF_W, BUF_H);
   glUniform2i(glGetUniformLocation(text_prog, "u_glyphs_count"), FONT_GLYPHS_W,
       FONT_GLYPHS_H);
   glUniform2f(glGetUniformLocation(text_prog, "u_resolution"), res_w, res_h);
+  // glUniform4f(glGetUniformLocation(text_prog, "u_rect"), 0, 0, res_w, res_h);
+  glUniform4f(glGetUniformLocation(text_prog, "u_rect"), 100, 100, res_w-200, res_h-200);
 
   // Logic
 
@@ -197,16 +198,16 @@ void start(void) {
 
   // Create text that will be printed to the log. Fill it with a pattern.
   u8 luminance[12] = ".,-~:;=!*#$@"; // don't keep null terminator
-  u8 msg[TEXT_W * TEXT_H];
+  u8 msg[BUF_W * BUF_H];
 
-  f32 kpx = (f32)2 / TEXT_W;
-  f32 kpy = (f32)2 / TEXT_H;
-  for (i32 y = 0; y < TEXT_H; ++y) {
-    for (i32 x = 0; x < TEXT_W; ++x) {
+  f32 kpx = (f32)2 / BUF_W;
+  f32 kpy = (f32)2 / BUF_H;
+  for (i32 y = 0; y < BUF_H; ++y) {
+    for (i32 x = 0; x < BUF_W; ++x) {
       f32 l = 0.25f * cosf32(kpx * x) + 0.25;
       f32 k = 0.25f * sinf32(kpy * y) + 0.25;
       i32 idx = (l + k) * (ARRAY_COUNT(luminance) - 1);
-      msg[TEXT_W * y + x] = luminance[idx];
+      msg[BUF_W * y + x] = luminance[idx];
     }
   }
   u32 text_line = 0;
@@ -214,7 +215,9 @@ void start(void) {
   f32 log_delay = 0;
   u32 log_line_prev = log_atomic_load_last_line(&g_log);
   (void)log_line_prev; // TODO:
-  i32 offset_y = 0;
+  i32 offset[2] = {0};
+  i32 buf_win[2] = {LOG_LINE_BYTES, 80};
+  f32 zoom = 1.0f;
 
   while (1) {
     // dt bookkeeping
@@ -251,23 +254,39 @@ void start(void) {
       if (log_delay > 0.3f) {
         log_delay = 0.0f;
         text_line += 1;
-        u32 line_in_buf = text_line % TEXT_H;
+        u32 line_in_buf = text_line % BUF_H;
         if (text_line % 10 == 0) {
           LOG_M(text_line, "Hold <SPACE> to Pause logging. Use <UP> and <DOWN> to scroll.");
         } else {
-          LOG_M(text_line, (const char*)(msg + TEXT_W * line_in_buf));
+          LOG_M(text_line, (const char*)(msg + BUF_W * line_in_buf));
         }
       }
     } else {
-      if (!loop.keycodes.e[KC_UP]) {
-        offset_y += 1;
+      if (loop.keycodes.e[KC_LEFT]) {
+        offset[0] -= 1;
       }
-      if (!loop.keycodes.e[KC_DOWN]) {
-        offset_y -= 1;
+      if (loop.keycodes.e[KC_RIGHT]) {
+        offset[0] += 1;
+      }
+      if (loop.keycodes.e[KC_UP]) {
+        offset[1] -= 1;
+      }
+      if (loop.keycodes.e[KC_DOWN]) {
+        offset[1] += 1;
+      }
+      if (loop.keycodes.e[KC_EQUAL]) {
+        zoom += 0.01;
+      }
+      if (loop.keycodes.e[KC_MINUS]) {
+        zoom -= 0.01;
       }
     }
-    i32 margin_y = 4;
-    offset_y = clampi32(offset_y, -BUF_H + TEXT_H - margin_y, margin_y);
+    i32 margin = 4;
+    offset[0] = clampi32(offset[0], -margin, BUF_W - buf_win[0] + margin);
+    offset[1] = clampi32(offset[1], -BUF_H + buf_win[1] - margin - 1, margin);
+    zoom = clampf32(zoom, 0.5f, 2.0f);
+    buf_win[0] = LOG_LINE_BYTES * zoom;
+    buf_win[1] = 80 * zoom;
 
     // Draw
     glEnable(GL_BLEND);
@@ -279,8 +298,9 @@ void start(void) {
     // Update text on the screen
     u32 log_line_last = log_atomic_load_last_line(&g_log);
 
-    glUniform1i(glGetUniformLocation(text_prog, "u_offset_y"), offset_y);
+    glUniform2i(glGetUniformLocation(text_prog, "u_offset"), offset[0], offset[1]);
     glUniform1i(glGetUniformLocation(text_prog, "u_line_last"), log_line_last);
+    glUniform2i(glGetUniformLocation(text_prog, "u_buf_window"), buf_win[0], buf_win[1]);
 
     // OpenGL can't map buffer
     glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
@@ -299,18 +319,18 @@ void start(void) {
           dlog_lines * BUF_W,
           g_log.buf);
     } else {
-      glBufferSubData(GL_TEXTURE_BUFFER, 0, log_line_last * TEXT_W, g_log.buf);
+      glBufferSubData(GL_TEXTURE_BUFFER, 0, log_line_last * BUF_W, g_log.buf);
       u32 dlog_lines = BUF_H - log_line_last;
       glBufferSubData(
           GL_TEXTURE_BUFFER,
-          log_line_prev * TEXT_W,
+          log_line_prev * BUF_W,
           dlog_lines * BUF_W,
           g_log.buf);
     }
 #endif
 
     // Draw text
-    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, TEXTS_COUNT);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
     window_flush(&w);
   }
