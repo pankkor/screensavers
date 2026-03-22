@@ -45,19 +45,17 @@ uniform usamplerBuffer u_text_buf; /* text ring buffer of size u_buf_size */ \r\
                                                                              \r\
 uniform vec4 u_rect;                                                         \r\
 uniform uint u_color; /* RGBA */                                             \r\
-uniform ivec2 u_buf_window;                                                  \r\
 uniform ivec2 u_buf_size; /* pow of 2 */                                     \r\
 uniform ivec2 u_glyphs_count; /* number of glyphs in atlas row and column */ \r\
-uniform ivec2 u_offset;                                                       \r\
+uniform ivec2 u_offset;                                                      \r\
+uniform vec2 u_glyph_size; /* size of glyph in pixels */                     \r\
+uniform float u_zoom;                                                        \r\
 uniform int u_line_last;                                                     \r\
                                                                              \r\
 in vec2 f_uv;                                                                \r\
 out vec4 frag_col;                                                           \r\
                                                                              \r\
 /* Returns 0 if x is outside of [l, r) */                                    \r\
-int mask_range(int x, int l, int r) {                                        \r\
-  return int(step(l, x) * (1.0 - step(r, x)));                               \r\
-}                                                                            \r\
 float mask_range(float x, float l, float r) {                                \r\
   return step(l, x) * (1.0 - step(r, x));                                    \r\
 }                                                                            \r\
@@ -70,20 +68,19 @@ vec4 rgba2vec4(uint rgba) {                                                  \r\
 void main(void) {                                                            \r\
   vec4 color = rgba2vec4(u_color);                                           \r\
   int buf_mod_mask = u_buf_size.y - 1;                                       \r\
-  vec2 glyph_pxs = vec2(16, 16);                                             \r\
-  // TODO:                                                                   \r\
-  // ivec2 buf_window = ivec2(u_rect.zw / glyph_pxs);                        \r\
-  ivec2 buf_window = u_buf_window;                                           \r\
+  float glyph_scale = u_zoom * u_rect.z / u_buf_size.x / u_glyph_size.x;     \r\
+  vec2 glyph_size = u_glyph_size * glyph_scale;                              \r\
+  ivec2 buf_window = ivec2(u_rect.zw / glyph_size);                          \r\
+                                                                             \r\
   vec2 win_pos = f_uv * buf_window + u_offset;                               \r\
-  ivec2 win_ipos = ivec2(win_pos);                                           \r\
                                                                              \r\
   /* Operate in logical space w/o u_line_last offset (first line at 0) */    \r\
   /* Offset for - window hight, so last line is at the bottom of a window */ \r\
-  int buf_row = win_ipos.x;                                     \r\
-  float buf_linef = win_ipos.y + u_buf_size.y - buf_window.y;      \r\
-  float mask_x = mask_range(win_pos.x, 0.0, float(u_buf_size.x));                         \r\
-  float mask_y = mask_range(buf_linef, 0.0, float(u_buf_size.y));                        \r\
-  float mask = mask_x * mask_y;                                                \r\
+  int buf_row = int(win_pos.x);                                              \r\
+  float buf_linef = win_pos.y + u_buf_size.y - buf_window.y;                 \r\
+  float mask_x = mask_range(win_pos.x, 0.0, float(u_buf_size.x));            \r\
+  float mask_y = mask_range(buf_linef, 0.0, float(u_buf_size.y));            \r\
+  float mask = mask_x * mask_y;                                              \r\
   /* Move to ring buffer space physical */                                   \r\
   int buf_line = (int(buf_linef) + u_line_last) & buf_mod_mask;              \r\
                                                                              \r\
@@ -99,7 +96,6 @@ void main(void) {                                                            \r\
   a *= mix(0.4, 1.0, float(dist) / u_buf_size.y);                            \r\
   a *= mask;                                                                 \r\
   frag_col = color * a;                                                      \r\
-  if (a - 0.01 < 0.0) { frag_col = vec4(1,0,0,1); }                            \r\
 }                                                                            \r\
 ";
 
@@ -172,18 +168,19 @@ void start(void) {
   glBindTexture(GL_TEXTURE_BUFFER, tbo);
   glTexBuffer(GL_TEXTURE_BUFFER, GL_R8UI, text_bo);
 
-  f32 res_w = w.rect[2];
-  f32 res_h = w.rect[3];
+  // TODO:
+  // f32 rect[4] = {0, 0, w.rect[2], w.rect[3]};
+  f32 rect[4] = {100, 100, w.rect[2] - 200, w.rect[3] - 200};
+  f32 glyph_size[2] = {(f32)FONT_TX_W / FONT_GLYPHS_W, (f32)FONT_TX_H / FONT_GLYPHS_H};
+
   glUniform1i(glGetUniformLocation(text_prog, "font_tx"), 0);
   glUniform1i(glGetUniformLocation(text_prog, "u_text_buf"), 1);
   glUniform1ui(glGetUniformLocation(text_prog, "u_color"), TEXT_COLOR_RGBA);
   glUniform2i(glGetUniformLocation(text_prog, "u_buf_size"), BUF_W, BUF_H);
-  glUniform2i(glGetUniformLocation(text_prog, "u_buf_window"), BUF_W, BUF_H);
   glUniform2i(glGetUniformLocation(text_prog, "u_glyphs_count"), FONT_GLYPHS_W,
       FONT_GLYPHS_H);
-  glUniform2f(glGetUniformLocation(text_prog, "u_resolution"), res_w, res_h);
-  // glUniform4f(glGetUniformLocation(text_prog, "u_rect"), 0, 0, res_w, res_h);
-  glUniform4f(glGetUniformLocation(text_prog, "u_rect"), 100, 100, res_w-200, res_h-200);
+  glUniform2f(glGetUniformLocation(text_prog, "u_resolution"), w.rect[2], w.rect[3]);
+  glUniform4f(glGetUniformLocation(text_prog, "u_rect"), rect[0], rect[1], rect[2], rect[3]);
 
   // Logic
 
@@ -195,6 +192,8 @@ void start(void) {
   f32 loop_s          = 0.0f;
   u64 loop_count      = 0;
   f32 print_dt_tsc    = tsc + 5.0f * cpu_timer_freq;
+  u64 frame_num   = 0;
+  (void)frame_num;
 
   // Create text that will be printed to the log. Fill it with a pattern.
   u8 luminance[12] = ".,-~:;=!*#$@"; // don't keep null terminator
@@ -210,14 +209,14 @@ void start(void) {
       msg[BUF_W * y + x] = luminance[idx];
     }
   }
-  u32 text_line = 0;
+  u32 text_line     = 0;
 
-  f32 log_delay = 0;
+  f32 log_delay     = 0;
   u32 log_line_prev = log_atomic_load_last_line(&g_log);
   (void)log_line_prev; // TODO:
-  i32 offset[2] = {0};
-  i32 buf_win[2] = {LOG_LINE_BYTES, 80};
-  f32 zoom = 1.0f;
+
+  i32 offset[2]     = {0};
+  f32 dzoom         = 0.0f;
 
   while (1) {
     // dt bookkeeping
@@ -275,18 +274,27 @@ void start(void) {
         offset[1] += 1;
       }
       if (loop.keycodes.e[KC_EQUAL]) {
-        zoom += 0.01;
+        dzoom += 0.01;
       }
       if (loop.keycodes.e[KC_MINUS]) {
-        zoom -= 0.01;
+        dzoom -= 0.01;
       }
     }
+
     i32 margin = 4;
-    offset[0] = clampi32(offset[0], -margin, BUF_W - buf_win[0] + margin);
-    offset[1] = clampi32(offset[1], -BUF_H + buf_win[1] - margin - 1, margin);
-    zoom = clampf32(zoom, 0.5f, 2.0f);
-    buf_win[0] = LOG_LINE_BYTES * zoom;
-    buf_win[1] = 80 * zoom;
+    dzoom = clampf32(dzoom, -0.5f, 0.5f);
+    f32 zoom = 1.0f + dzoom;
+
+    f32 glyph_size_zoomed[2];
+    i32 buf_win[2];
+    f32 glyph_scale = zoom * rect[2] / BUF_W / glyph_size[0];
+    glyph_size_zoomed[0] = glyph_size[0] * glyph_scale;
+    glyph_size_zoomed[1] = glyph_size[1] * glyph_scale;
+    buf_win[0] = rect[2] / glyph_size_zoomed[0];
+    buf_win[1] = rect[3] / glyph_size_zoomed[1];
+
+    offset[0] = clamp_minmax_i32(offset[0], -margin, MAX(BUF_W - buf_win[0], 0) + margin);
+    offset[1] = clamp_minmax_i32(offset[1], MIN(-BUF_H + buf_win[1], 0) - margin, margin);
 
     // Draw
     glEnable(GL_BLEND);
@@ -298,9 +306,12 @@ void start(void) {
     // Update text on the screen
     u32 log_line_last = log_atomic_load_last_line(&g_log);
 
-    glUniform2i(glGetUniformLocation(text_prog, "u_offset"), offset[0], offset[1]);
+    glUniform2i(glGetUniformLocation(text_prog, "u_offset"), offset[0],
+        offset[1]);
     glUniform1i(glGetUniformLocation(text_prog, "u_line_last"), log_line_last);
-    glUniform2i(glGetUniformLocation(text_prog, "u_buf_window"), buf_win[0], buf_win[1]);
+    glUniform2f(glGetUniformLocation(text_prog, "u_glyph_size"), glyph_size[0],
+      glyph_size[1]);
+    glUniform1f(glGetUniformLocation(text_prog, "u_zoom"), zoom);
 
     // OpenGL can't map buffer
     glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
@@ -333,6 +344,8 @@ void start(void) {
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
     window_flush(&w);
+
+    ++frame_num;
   }
 
 shutdown:

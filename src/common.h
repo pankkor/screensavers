@@ -364,6 +364,15 @@ INLINE static i32 clampi32(i32 v, i32 lo, i32 hi) {
   return v > hi ? hi : v < lo ? lo : v;
 }
 
+INLINE static f32 clamp_minmax_f32(f32 v, f32 a, f32 b) {
+  f32 lo = MIN(a, b); f32 hi = MAX(a, b);
+  return v > hi ? hi : v < lo ? lo : v;
+}
+
+INLINE static i32 clamp_minmax_i32(i32 v, i32 a, i32 b) {
+  i32 lo = MIN(a, b); i32 hi = MAX(a, b);
+  return v > hi ? hi : v < lo ? lo : v;
+}
 
 INLINE static f32 lerpf32(f32 k, f32 x, f32 y) {
   return (1.0f - k) * x + y * k;
