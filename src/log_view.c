@@ -37,8 +37,6 @@ void main(void) {                                                            \r\
   vec2 ndc = 2.0 * vert - 1.0; /* in [-1, 1] */                              \r\
                                                                              \r\
   f_win_pos = uv * u_buf_window + u_offset;                                  \r\
-  float scale_x = float(u_buf_window.x) / u_buf_size.x;                      \r\
-  f_win_pos.x += mix(u_buf_size.x * 0.5, 0.0, scale_x);                      \r\
   gl_Position = vec4(ndc, 0.0, 1.0);                                         \r\
 }                                                                            \r\
 ";
@@ -291,7 +289,6 @@ void start(void) {
       }
     }
 
-    i32 margin = 0;
     dzoom = clampf32(dzoom, -0.5f, 0.5f);
     f32 zoom = 1.0f + dzoom;
 
@@ -303,8 +300,12 @@ void start(void) {
     buf_win[0] = rect[2] / glyph_size_zoomed[0];
     buf_win[1] = rect[3] / glyph_size_zoomed[1];
 
-    offset[0] = clamp_minmax_i32(offset[0], -margin, MAX(BUF_W - buf_win[0], 0) + margin);
-    offset[1] = clamp_minmax_i32(offset[1], MIN(-BUF_H + buf_win[1], 0) - margin, margin);
+    // Center zoomed buffer (round up to i32)
+    i32 offset_zoom_x = MIN((BUF_W - buf_win[0]) * 0.5f + 0.5f, 0.0f);
+
+    i32 margin[2] = {0};
+    offset[0] = clamp_minmax_i32(offset[0], -margin[0], MAX(BUF_W - buf_win[0], 0) + margin[0]);
+    offset[1] = clamp_minmax_i32(offset[1], MIN(-BUF_H + buf_win[1], 0) - margin[1], margin[1]);
 
     // Draw
     glEnable(GL_BLEND);
@@ -317,7 +318,7 @@ void start(void) {
     u32 log_line_last = log_atomic_load_last_line(&g_log);
 
     glUniform4f(glGetUniformLocation(text_prog, "u_rect"), rect[0], rect[1], rect[2], rect[3]);
-    glUniform2i(glGetUniformLocation(text_prog, "u_offset"), offset[0],
+    glUniform2i(glGetUniformLocation(text_prog, "u_offset"), offset[0] + offset_zoom_x,
         offset[1]);
     glUniform1i(glGetUniformLocation(text_prog, "u_line_last"), log_line_last);
     glUniform2i(glGetUniformLocation(text_prog, "u_buf_window"), buf_win[0],
