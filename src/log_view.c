@@ -24,6 +24,7 @@ u32 TEXT_COLOR_RGBA = 0xCFDFFFFF; // 0xRRGGBBAA
 static const char * const s_text_vert_src  = GLSL_V410 "                     \r\
 uniform vec2 u_resolution;                                                   \r\
 uniform vec4 u_rect;                                                         \r\
+uniform ivec2 u_buf_size; /* pow of 2 */                                     \r\
 uniform ivec2 u_buf_window;                                                  \r\
 uniform ivec2 u_offset;                                                      \r\
                                                                              \r\
@@ -36,6 +37,8 @@ void main(void) {                                                            \r\
   vec2 ndc = 2.0 * vert - 1.0; /* in [-1, 1] */                              \r\
                                                                              \r\
   f_win_pos = uv * u_buf_window + u_offset;                                  \r\
+  float scale_x = float(u_buf_window.x) / u_buf_size.x;                      \r\
+  f_win_pos.x += mix(u_buf_size.x * 0.5, 0.0, scale_x);                      \r\
   gl_Position = vec4(ndc, 0.0, 1.0);                                         \r\
 }                                                                            \r\
 ";
@@ -47,9 +50,9 @@ uniform usamplerBuffer u_text_buf; /* text ring buffer of size u_buf_size */ \r\
 uniform vec4 u_rect;                                                         \r\
 uniform uint u_color; /* RGBA */                                             \r\
 uniform ivec2 u_buf_size; /* pow of 2 */                                     \r\
+uniform ivec2 u_buf_window;                                                  \r\
 uniform ivec2 u_glyphs_count; /* number of glyphs in atlas row and column */ \r\
 uniform int u_line_last;                                                     \r\
-uniform ivec2 u_buf_window;                                                  \r\
                                                                              \r\
 in vec2 f_win_pos;                                                           \r\
 out vec4 frag_col;                                                           \r\
