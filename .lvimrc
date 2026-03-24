@@ -9,8 +9,16 @@ if !exists('*s:build_and_run_current_file')
   function! s:build_and_run_current_file()
     let l:full = expand('%')
     let l:root = expand('%:t:r')
-    execute 'make --no-test ' . fnameescape(l:full)
-    execute '!./build/' . fnameescape(l:root)
+    if &buftype != '' || expand('%:e') == 'h' || &filetype != 'c'
+      echohl ErrorMsg
+      echo "Wrong buffer to Build and Run '" . fnameescape(l:full) . "'"
+      echohl None
+    else
+      execute 'make --no-test ' . fnameescape(l:full)
+      if empty(filter(getqflist(), 'v:val.valid'))
+        execute '!./build/' . fnameescape(l:root)
+      endif
+    endif
   endfunction
 endif
 
