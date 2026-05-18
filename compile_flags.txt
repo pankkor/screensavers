@@ -2,10 +2,13 @@
 -Wall
 -Wextra
 -Wpedantic
--Wno-fixed-enum-extension
 -Wno-gnu-statement-expression-from-macro-expansion
 -Wno-unused-function
 -Wno-overlength-strings
+-Wno-c23-extensions
+-Wno-fixed-enum-extension
+-Wno-unterminated-string-initialization
+-Wno-unknown-warning-option
 -O0
 -mcpu=native
 -g

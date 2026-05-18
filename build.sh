@@ -113,14 +113,14 @@ EOF
   fi
   "$@" || die "failed to build '$src'!"
 
-  # Sign
+  # Optional signinig
   echo "Signing  '$out'..."
   set -- codesign --force --sign 'Apple Development' --entitlements "$entitlements_plist" "$out"
   if [ $verbose -eq 1 ]; then
     printf '%s ' "$@"; printf '\n'
     printf '\n'
   fi
-  "$@" || die "failed to sign '$out'!"
+  "$@" || echo "failed to sign '$out'!" >&2 # Non fatal error
 done
 
 if [ $run_test -eq 1 -a -f ./build/test ]; then
