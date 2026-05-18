@@ -230,6 +230,17 @@ i64 os_free_pages(void *p, u64 page_count) {
   return sys_munmap(p, size);
 }
 
+void *os_alloc(u64 size) {
+  void *m;
+  i32 flags = MAP_PRIVATE | MAP_ANON;
+  m = sys_mmap(0, size, PROT_READ | PROT_WRITE, flags, -1, 0);
+  return m;
+}
+
+i64 os_free(void *p, u64 size) {
+  return sys_munmap(p, size);
+}
+
 // -----------------------------------------------------------------------------
 // Helper
 // -----------------------------------------------------------------------------
@@ -388,7 +399,7 @@ INLINE static f32 sqrtf32(f32 x) {
   return res;
 }
 
-// TODO: loses precisions when x and y range is big
+// This fmod loses precisions when x and y range is big
 INLINE static f32 fmodf32(f32 x, f32 y) {
   f32 res;
   __asm__ (
@@ -777,7 +788,7 @@ static i32 cstr_n_copy(u8 *dst, const char *src, i32 n) {
 // -----------------------------------------------------------------------------
 
 // Take `src` buffer up to `n` characters and copy it to `dst` buffer.
-// omitting leading charactes `c`.
+// omitting leading characters `c`.
 // c='0' "0000abc0" -> "abc0"
 // Returns number of characters copied
 INLINE static i32 buf_n_copy_trim_leading(u8 * restrict dst,
