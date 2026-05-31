@@ -17,6 +17,7 @@ Options
   --help,-h         This help.
   --verbose,-v      Verbose build. Print build command.
   --no-test         Don't run test at '/build/test'.
+  --no-sign         Don't run code signing step.
 "
 
 die() {
@@ -26,6 +27,7 @@ die() {
 
 verbose=0
 run_test=1
+code_sign=1
 srcs='src/*.c'
 
 while [ $# -gt 0 ]; do
@@ -40,6 +42,10 @@ while [ $# -gt 0 ]; do
       ;;
     --no-test)
       run_test=0
+      shift
+      ;;
+    --no-sign)
+      code_sign=0
       shift
       ;;
     -*)
@@ -113,14 +119,16 @@ EOF
   fi
   "$@" || die "failed to build '$src'!"
 
-  # Optional signinig
-  echo "Signing  '$out'..."
-  set -- codesign --force --sign 'Apple Development' --entitlements "$entitlements_plist" "$out"
-  if [ $verbose -eq 1 ]; then
-    printf '%s ' "$@"; printf '\n'
-    printf '\n'
-  fi
+  # Optional code signinig
+  if [ $code_sign -eq 1 ]; then
+    echo "Signing  '$out'..."
+    set -- codesign --force --sign 'Apple Development' --entitlements "$entitlements_plist" "$out"
+    if [ $verbose -eq 1 ]; then
+      printf '%s ' "$@"; printf '\n'
+      printf '\n'
+    fi
   "$@" || echo "failed to sign '$out'!" >&2 # Non fatal error
+  fi
 done
 
 if [ $run_test -eq 1 -a -f ./build/test ]; then

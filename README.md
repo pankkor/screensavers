@@ -5,7 +5,7 @@
 - No libc (-nostdlib).
 - Not optimizated.
 - Taps to keyboard events. Requests Input Monitoring perimssion.
-- To exit press ESC.
+- To exit press <ESC>.
 
 ### Supported Platforms
 - macOS AArch64 (clang)
@@ -45,9 +45,11 @@ https://github.com/user-attachments/assets/745f3da5-ec2c-4ae3-abec-6852187c4f96
 ## Bitmap font
 `src/font.c`
 
-Bitmap font.
+Bitmap and SDF font rendering.
 - 16x16 characters ASCII R8 bitmap tilemap.
+- 16x16 characters SDF R8 bitmap tilemap.
 - ASCII frame animation.
+- Hold <SPACE> to change from bitmap to to SDF font.
 
 https://github.com/user-attachments/assets/d2f55f67-390f-4e15-8367-cb0785a34665
 

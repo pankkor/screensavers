@@ -1,14 +1,10 @@
+// Bitmap Font from https://lazyfoo.net/
 enum {
   FONT_TX_W = 1024,
   FONT_TX_H = 1024,
-};
-
-enum {
   FONT_GLYPHS_W = 16,
   FONT_GLYPHS_H = 16,
 };
-
-// Bitmap Font from https://lazyfoo.net/
 
 // R8 glyph tile map. 16 glyphs x 16 glyphs
 static const u8 s_font_tx_data[FONT_TX_W * FONT_TX_H] = {

@@ -1,4 +1,4 @@
-// Bitmap font
+// Bitmap and SDF fonts
 //
 // Platforms
 //   macOS AArch64
@@ -10,7 +10,30 @@
 #include "common.h"
 
 #include "res_font_256.h"
+#include "res_font_square_sdf_1024.h"
+#include "res_font_nonsquare_sdf_1024.h"
 #include "res_ascii_anim.h"
+
+#if 1
+// Use res_font_square_sdf_1024.h
+#define FONT_SDF_TX_W       FONT_SQUARE_SDF_TX_W
+#define FONT_SDF_TX_H       FONT_SQUARE_SDF_TX_H
+#define FONT_SDF_GLYPHS_W   FONT_SQUARE_SDF_GLYPHS_W
+#define FONT_SDF_GLYPHS_H   FONT_SQUARE_SDF_GLYPHS_H
+#define FONT_SDF_SPREAD     FONT_SQUARE_SDF_SPREAD
+#define S_FONT_SDF_TX_DATA  s_font_square_sdf_tx_data
+#else
+// Use res_font_nonsquare_sdf_1024.h
+#define FONT_SDF_TX_W       FONT_NONSQUARE_SDF_TX_W
+#define FONT_SDF_TX_H       FONT_NONSQUARE_SDF_TX_H
+#define FONT_SDF_GLYPHS_W   FONT_NONSQUARE_SDF_GLYPHS_W
+#define FONT_SDF_GLYPHS_H   FONT_NONSQUARE_SDF_GLYPHS_H
+#define FONT_SDF_SPREAD     FONT_NONSQUARE_SDF_SPREAD
+#define S_FONT_SDF_TX_DATA  s_font_nonsquare_sdf_tx_data
+#endif
+
+static_assert(FONT_GLYPHS_W == FONT_SDF_GLYPHS_W);
+static_assert(FONT_GLYPHS_H == FONT_SDF_GLYPHS_H);
 
 enum {
   TEXT_W = 80,
@@ -19,6 +42,8 @@ enum {
 };
 
 u32 TEXT_COLOR_RGBA = 0xCFDFFFFF; // 0xRRGGBBAA
+f32 BG_COLOR[4] = {0.2f, 0.2f, 0.2f, 1.0f};
+f32 SDF_BOLD = 0.2f;
 
 // Text that only fits on the screen
 ALIGNED(16) u8 s_text[TEXT_W * TEXT_H] =
@@ -35,8 +60,8 @@ u8 s_luminance[12] = ".,-~:;=!*#$@"; // don't keep null terminator
 static const char * const s_text_vert_src = "                                \r\
 #version 410 core                                                            \r\
                                                                              \r\
-uniform vec2 size;                                                           \r\
-uniform uint color_rgba;                                                     \r\
+uniform vec2 u_size;                                                         \r\
+uniform uint u_color_rgba;                                                   \r\
                                                                              \r\
 out vec2 f_uv;                                                               \r\
 out vec4 f_color;                                                            \r\
@@ -54,11 +79,11 @@ vec4 rgba2vec4(uint rgba) {                                                  \r\
 }                                                                            \r\
                                                                              \r\
 void main(void) {                                                            \r\
-  vec2 vert = verts[gl_VertexID] * size;                                     \r\
+  vec2 vert = verts[gl_VertexID] * u_size;                                   \r\
   vec2 uv = uvs[gl_VertexID];                                                \r\
   gl_Position = vec4(vert, 0.0, 1.0);                                        \r\
   f_uv = uv;                                                                 \r\
-  f_color = rgba2vec4(color_rgba);                                           \r\
+  f_color = rgba2vec4(u_color_rgba);                                         \r\
 }                                                                            \r\
 ";
 
@@ -68,21 +93,54 @@ in vec2 f_uv;                                                                \r\
 in vec4 f_color;                                                             \r\
                                                                              \r\
 uniform sampler2D font_tx;                                                   \r\
-uniform usamplerBuffer text_buf;                                             \r\
+uniform sampler2D sdf_tx;                                                    \r\
+uniform usamplerBuffer u_text_buf;                                           \r\
                                                                              \r\
-uniform ivec2 buf_size;                                                      \r\
-uniform ivec2 glyphs_count; /* number of glyphs in atlas row and column */   \r\
+uniform ivec2 u_buf_size;                                                    \r\
+uniform ivec2 u_glyphs_count;   // number of glyphs in atlas row and column  \r\
+uniform int u_sdf_spread;       // spread used to generate SDF               \r\
+uniform float u_sdf_bold;       // bolden in screen pixels                   \r\
+uniform int is_sdf;                                                          \r\
                                                                              \r\
 out vec4 frag_col;                                                           \r\
                                                                              \r\
+vec4 font_bitmap(sampler2D r8_tx, vec2 uv, vec4 color) {                     \r\
+  return color * texture(r8_tx, uv).r;                                       \r\
+}                                                                            \r\
+                                                                             \r\
+// SDF with AA                                                               \r\
+vec4 font_sdf(sampler2D r8_tx, vec2 uv, vec2 duvdx, vec2 duvdy, vec4 color) {\r\
+  float d = textureGrad(r8_tx, uv, duvdx, duvdy).r;                          \r\
+  float sd_texels = (d - 0.5) * 2.0 * u_sdf_spread; // sdf in texels         \r\
+                                                                             \r\
+  vec2 tx_size = vec2(textureSize(r8_tx, 0));                                \r\
+  float texels_per_px = length(vec2(                                         \r\
+    length(duvdx * tx_size),                                                 \r\
+    length(duvdy * tx_size)                                                  \r\
+  ));                                                                        \r\
+  float sd_px = sd_texels / texels_per_px; // sdf in screen pixels           \r\
+                                                                             \r\
+  float a = clamp(sd_px + 0.5 + u_sdf_bold, 0.0, 1.0);                       \r\
+  return a * color;                                                          \r\
+}                                                                            \r\
+                                                                             \r\
 void main(void) {                                                            \r\
-  ivec2 buf_pos = ivec2(f_uv * buf_size);                                    \r\
-  int buf_idx = buf_pos.x + buf_pos.y * buf_size.x;                          \r\
-  uint c = texelFetch(text_buf, buf_idx).r;                                  \r\
-  vec2 glyph_pos = vec2(c % glyphs_count.x, c / glyphs_count.y);             \r\
-  vec2 uv = (glyph_pos + mod(f_uv * buf_size, 1.0)) / glyphs_count;          \r\
-  float a = texture(font_tx, uv).r;                                          \r\
-  frag_col = f_color * a;                                                    \r\
+  vec2 cell = f_uv * u_buf_size;                                             \r\
+  ivec2 buf_pos = ivec2(cell);                                               \r\
+  int buf_idx = buf_pos.x + buf_pos.y * u_buf_size.x;                        \r\
+  uint c = texelFetch(u_text_buf, buf_idx).r;                                \r\
+  vec2 glyph_pos = vec2(c % u_glyphs_count.x, c / u_glyphs_count.y);         \r\
+  vec2 uv = (glyph_pos + fract(cell)) / u_glyphs_count;                      \r\
+                                                                             \r\
+  // Correct, cell-boundary-safe UV derivatives:                             \r\
+  vec2 duvdx = dFdx(cell) / vec2(u_glyphs_count);                            \r\
+  vec2 duvdy = dFdy(cell) / vec2(u_glyphs_count);                            \r\
+                                                                             \r\
+  if (is_sdf == 0) {                                                         \r\
+    frag_col = font_bitmap(font_tx, uv, f_color);                            \r\
+  } else {                                                                   \r\
+    frag_col = font_sdf(sdf_tx, uv, duvdx, duvdy, f_color);                  \r\
+  }                                                                          \r\
 }                                                                            \r\
 ";
 
@@ -105,6 +163,7 @@ void start(void) {
   print_cstr(STDOUT, "'\nGL_MAX_ARRAY_TEXTURE_LAYERS: ");
   print_i64(STDOUT, max_array_texture_layers);
   print_cstr(STDOUT, "\n\n");
+  print_cstr(STDOUT, "<Hold SPACE for SDF font>\n");
   print_cstr(STDOUT, "<Press ESC to exit>\n");
 
   GLuint text_prog = create_gl_shader_program(
@@ -129,8 +188,8 @@ void start(void) {
   // Font texture
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-  glActiveTexture(GL_TEXTURE0);
   GLuint font_tx;
+  glActiveTexture(GL_TEXTURE0);
   glGenTextures(1, &font_tx);
   glBindTexture(GL_TEXTURE_2D, font_tx);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, FONT_TX_W, FONT_TX_H, 0, GL_RED,
@@ -141,23 +200,37 @@ void start(void) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glGenerateMipmap(GL_TEXTURE_2D);
 
+  GLuint sdf_tx;
+  glActiveTexture(GL_TEXTURE1);
+  glGenTextures(1, &sdf_tx);
+  glBindTexture(GL_TEXTURE_2D, sdf_tx);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, FONT_SDF_TX_W, FONT_SDF_TX_H, 0,
+      GL_RED, GL_UNSIGNED_BYTE, S_FONT_SDF_TX_DATA);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
   // On screen text buffer
   glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
   glBufferData(GL_TEXTURE_BUFFER, TEXT_W * TEXT_H, s_text, GL_STREAM_DRAW);
 
-  glActiveTexture(GL_TEXTURE1);
+  glActiveTexture(GL_TEXTURE2);
   GLuint tbo;
   glGenTextures(1, &tbo);
   glBindTexture(GL_TEXTURE_BUFFER, tbo);
   glTexBuffer(GL_TEXTURE_BUFFER, GL_R8UI, text_bo);
 
   glUniform1i(glGetUniformLocation(text_prog, "font_tx"), 0);
-  glUniform1i(glGetUniformLocation(text_prog, "text_buf"), 1);
-  glUniform1f(glGetUniformLocation(text_prog, "iaspect"), iaspect);
-  glUniform2f(glGetUniformLocation(text_prog, "size"), size[0], size[1]);
-  glUniform1ui(glGetUniformLocation(text_prog, "color_rgba"), TEXT_COLOR_RGBA);
-  glUniform2i(glGetUniformLocation(text_prog, "buf_size"), TEXT_W, TEXT_H);
-  glUniform2i(glGetUniformLocation(text_prog, "glyphs_count"), FONT_GLYPHS_W, FONT_GLYPHS_H);
+  glUniform1i(glGetUniformLocation(text_prog, "sdf_tx"), 1);
+  glUniform1i(glGetUniformLocation(text_prog, "u_text_buf"), 2);
+  glUniform2f(glGetUniformLocation(text_prog, "u_size"), size[0], size[1]);
+  glUniform1ui(glGetUniformLocation(text_prog, "u_color_rgba"), TEXT_COLOR_RGBA);
+  glUniform2i(glGetUniformLocation(text_prog, "u_buf_size"), TEXT_W, TEXT_H);
+  glUniform2i(glGetUniformLocation(text_prog, "u_glyphs_count"), FONT_GLYPHS_W,
+      FONT_GLYPHS_H);
+  glUniform1i(glGetUniformLocation(text_prog, "u_sdf_spread"), FONT_SDF_SPREAD);
+  glUniform1f(glGetUniformLocation(text_prog, "u_sdf_bold"), SDF_BOLD);
 
   // Logic
 
@@ -187,6 +260,7 @@ void start(void) {
   i32 anim_copy_h     = anim_dst_ry - anim_dst_ly;
 
   f32 bg_anim_t       = 0.0f; // normalized [0; 1.0)
+  b32 is_sdf          = 0;
 
   while (1) {
     // dt bookkeeping
@@ -218,6 +292,9 @@ void start(void) {
       goto shutdown;
     }
 
+    // Hold space for SDF font
+    is_sdf = loop.keycodes.e[KC_SPACE];
+
     // Animate background
     bg_anim_t = fmodf32(bg_anim_t + dt, 1.0f);
 
@@ -244,11 +321,13 @@ void start(void) {
     }
 
     // Draw
+    glUniform1i(glGetUniformLocation(text_prog, "is_sdf"), is_sdf);
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
     glClear(GL_COLOR_BUFFER_BIT);
-    glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
+    glClearColor(BG_COLOR[0], BG_COLOR[1], BG_COLOR[2], BG_COLOR[3]);
 
     // Update text on the screen
     glBindBuffer(GL_TEXTURE_BUFFER, text_bo);

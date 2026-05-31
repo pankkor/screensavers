@@ -14,7 +14,7 @@ if !exists('*s:build_and_run_current_file')
       echo "Wrong buffer to Build and Run '" . fnameescape(l:full) . "'"
       echohl None
     else
-      execute 'make --no-test ' . fnameescape(l:full)
+      execute 'make --no-test --no-sign ' . fnameescape(l:full)
       if empty(filter(getqflist(), 'v:val.valid'))
         execute '!./build/' . fnameescape(l:root)
       endif
