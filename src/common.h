@@ -1692,6 +1692,16 @@ static i32 window_flush(struct window *w) {
 // #include <Carbon/Carbon.h>
 // and go to definition of kVK_Escape
 enum KC : u8 {
+  KC_1        = 0x12,
+  KC_2        = 0x13,
+  KC_3        = 0x14,
+  KC_4        = 0x15,
+  KC_5        = 0x17,
+  KC_6        = 0x16,
+  KC_7        = 0x1A,
+  KC_8        = 0x1C,
+  KC_9        = 0x19,
+  KC_0        = 0x1D,
   KC_EQUAL    = 0x18, // = and +
   KC_MINUS    = 0x1B, // - and _
   KC_RET      = 0x24,

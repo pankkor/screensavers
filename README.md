@@ -37,7 +37,7 @@ https://github.com/user-attachments/assets/eb9552e4-32e3-4b9c-8be6-1a401453ae10
 Help lovers (with flower bouquets) find each other.
 Arrows on the keyboard control blue lover.
 
-- Sprite animation.
+- Sprite flipbook animation.
 - Some simple game logic.
 
 https://github.com/user-attachments/assets/745f3da5-ec2c-4ae3-abec-6852187c4f96

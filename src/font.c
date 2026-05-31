@@ -100,7 +100,7 @@ uniform ivec2 u_buf_size;                                                    \r\
 uniform ivec2 u_glyphs_count;   // number of glyphs in atlas row and column  \r\
 uniform int u_sdf_spread;       // spread used to generate SDF               \r\
 uniform float u_sdf_bold;       // bolden in screen pixels                   \r\
-uniform int is_sdf;                                                          \r\
+uniform int u_is_sdf;                                                        \r\
                                                                              \r\
 out vec4 frag_col;                                                           \r\
                                                                              \r\
@@ -132,11 +132,11 @@ void main(void) {                                                            \r\
   vec2 glyph_pos = vec2(c % u_glyphs_count.x, c / u_glyphs_count.y);         \r\
   vec2 uv = (glyph_pos + fract(cell)) / u_glyphs_count;                      \r\
                                                                              \r\
-  // Correct, cell-boundary-safe UV derivatives:                             \r\
+  // Cell bound UV derivatives                                               \r\
   vec2 duvdx = dFdx(cell) / vec2(u_glyphs_count);                            \r\
   vec2 duvdy = dFdy(cell) / vec2(u_glyphs_count);                            \r\
                                                                              \r\
-  if (is_sdf == 0) {                                                         \r\
+  if (u_is_sdf == 0) {                                                       \r\
     frag_col = font_bitmap(font_tx, uv, f_color);                            \r\
   } else {                                                                   \r\
     frag_col = font_sdf(sdf_tx, uv, duvdx, duvdy, f_color);                  \r\
@@ -215,8 +215,8 @@ void start(void) {
   glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
   glBufferData(GL_TEXTURE_BUFFER, TEXT_W * TEXT_H, s_text, GL_STREAM_DRAW);
 
-  glActiveTexture(GL_TEXTURE2);
   GLuint tbo;
+  glActiveTexture(GL_TEXTURE2);
   glGenTextures(1, &tbo);
   glBindTexture(GL_TEXTURE_BUFFER, tbo);
   glTexBuffer(GL_TEXTURE_BUFFER, GL_R8UI, text_bo);
@@ -321,7 +321,7 @@ void start(void) {
     }
 
     // Draw
-    glUniform1i(glGetUniformLocation(text_prog, "is_sdf"), is_sdf);
+    glUniform1i(glGetUniformLocation(text_prog, "u_is_sdf"), is_sdf);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);

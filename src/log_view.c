@@ -1,4 +1,4 @@
-// View mmaped ring buffer log file with bitmap font
+// View mmaped ring buffer log file with bitmap and SDF fonts
 //
 // Platforms
 //   macOS AArch64
@@ -10,6 +10,17 @@
 #include "common.h"
 
 #include "res_font_256.h"
+#include "res_font_square_sdf_1024.h"
+
+#define FONT_SDF_TX_W       FONT_SQUARE_SDF_TX_W
+#define FONT_SDF_TX_H       FONT_SQUARE_SDF_TX_H
+#define FONT_SDF_GLYPHS_W   FONT_SQUARE_SDF_GLYPHS_W
+#define FONT_SDF_GLYPHS_H   FONT_SQUARE_SDF_GLYPHS_H
+#define FONT_SDF_SPREAD     FONT_SQUARE_SDF_SPREAD
+#define S_FONT_SDF_TX_DATA  s_font_square_sdf_tx_data
+
+static_assert(FONT_GLYPHS_W == FONT_SDF_GLYPHS_W);
+static_assert(FONT_GLYPHS_H == FONT_SDF_GLYPHS_H);
 
 enum {
   BUF_W = LOG_LINE_BYTES,
@@ -17,6 +28,8 @@ enum {
 };
 
 u32 TEXT_COLOR_RGBA = 0xCFDFFFFF; // 0xRRGGBBAA
+f32 BG_COLOR[4] = {0.2f, 0.2f, 0.2f, 1.0f};
+f32 SDF_BOLD = 0.0f;
 
 // --------------------------------------
 // GLSL
@@ -43,14 +56,18 @@ void main(void) {                                                            \r\
 
 static const char * const s_text_frag_src  = GLSL_V410 "                     \r\
 uniform sampler2D font_tx;                                                   \r\
-uniform usamplerBuffer u_text_buf; /* text ring buffer of size u_buf_size */ \r\
+uniform sampler2D sdf_tx;                                                    \r\
+uniform usamplerBuffer u_text_buf; // text ring buffer of size u_buf_size    \r\
                                                                              \r\
 uniform vec4 u_rect;                                                         \r\
-uniform uint u_color; /* RGBA */                                             \r\
-uniform ivec2 u_buf_size; /* pow of 2 */                                     \r\
+uniform uint u_color;         // RGBA                                        \r\
+uniform ivec2 u_buf_size;     // pow of 2                                    \r\
 uniform ivec2 u_buf_window;                                                  \r\
-uniform ivec2 u_glyphs_count; /* number of glyphs in atlas row and column */ \r\
+uniform ivec2 u_glyphs_count; // number of glyphs in atlas row and column    \r\
 uniform int u_line_last;                                                     \r\
+uniform int u_sdf_spread;     // spread used to generate SDF                 \r\
+uniform float u_sdf_bold;     // bolden in screen pixels                     \r\
+uniform int u_is_sdf;                                                        \r\
                                                                              \r\
 in vec2 f_win_pos;                                                           \r\
 out vec4 frag_col;                                                           \r\
@@ -65,20 +82,40 @@ vec4 rgba2vec4(uint rgba) {                                                  \r\
     (rgba >> 8) & 0xFFu, rgba & 0xFFu) / 255.0;                              \r\
 }                                                                            \r\
                                                                              \r\
+float font_bitmap(sampler2D r8_tx, vec2 uv) {                                \r\
+  return texture(r8_tx, uv).r;                                               \r\
+}                                                                            \r\
+                                                                             \r\
+// SDF with AA                                                               \r\
+float font_sdf(sampler2D r8_tx, vec2 uv, vec2 duvdx, vec2 duvdy) {           \r\
+  float d = textureGrad(r8_tx, uv, duvdx, duvdy).r;                          \r\
+  float sd_texels = (d - 0.5) * 2.0 * u_sdf_spread; // sdf in texels         \r\
+                                                                             \r\
+  vec2 tx_size = vec2(textureSize(r8_tx, 0));                                \r\
+  float texels_per_px = length(vec2(                                         \r\
+    length(duvdx * tx_size),                                                 \r\
+    length(duvdy * tx_size)                                                  \r\
+  ));                                                                        \r\
+  float sd_px = sd_texels / texels_per_px; // sdf in screen pixels           \r\
+                                                                             \r\
+  float a = clamp(sd_px + 0.5 + u_sdf_bold, 0.0, 1.0);                       \r\
+  return a;                                                                  \r\
+}                                                                            \r\
+                                                                             \r\
 void main(void) {                                                            \r\
   vec4 color = rgba2vec4(u_color);                                           \r\
   int buf_mod_mask = u_buf_size.y - 1;                                       \r\
                                                                              \r\
   vec2 win_pos = f_win_pos;                                                  \r\
                                                                              \r\
-  /* Operate in logical space w/o u_line_last offset (first line at 0) */    \r\
-  /* Offset for - window hight, so last line is at the bottom of a window */ \r\
+  // Operate in logical space w/o u_line_last offset (first line at 0)       \r\
+  // Offset for - window hight, so last line is at the bottom of a window    \r\
   int buf_row = int(win_pos.x);                                              \r\
   float buf_linef = win_pos.y + u_buf_size.y - u_buf_window.y;               \r\
   float mask_x = mask_range(win_pos.x, 0.0, float(u_buf_size.x));            \r\
   float mask_y = mask_range(buf_linef, 0.0, float(u_buf_size.y));            \r\
   float mask = mask_x * mask_y;                                              \r\
-  /* Move to ring buffer space physical */                                   \r\
+  // Move to ring buffer space physical                                      \r\
   int buf_line = (int(buf_linef) + u_line_last) & buf_mod_mask;              \r\
                                                                              \r\
   int buf_idx = buf_row + buf_line * u_buf_size.x;                           \r\
@@ -86,9 +123,19 @@ void main(void) {                                                            \r\
                                                                              \r\
   vec2 glyph_pos = vec2(c % u_glyphs_count.x, c / u_glyphs_count.y);         \r\
   vec2 uv = (glyph_pos + fract(win_pos)) / u_glyphs_count;                   \r\
-  float a = texture(font_tx, uv).r;                                          \r\
                                                                              \r\
-  /* Dim older recent lines */                                               \r\
+  // Cell bound UV derivatives                                               \r\
+  vec2 duvdx = dFdx(win_pos) / vec2(u_glyphs_count);                         \r\
+  vec2 duvdy = dFdy(win_pos) / vec2(u_glyphs_count);                         \r\
+                                                                             \r\
+  float a;                                                                   \r\
+  if (u_is_sdf == 0) {                                                       \r\
+    a = font_bitmap(font_tx, uv);                                            \r\
+  } else {                                                                   \r\
+    a = font_sdf(sdf_tx, uv, duvdx, duvdy);                                  \r\
+  }                                                                          \r\
+                                                                             \r\
+  // Dim older recent lines                                                  \r\
   int dist = (buf_line - u_line_last) & buf_mod_mask;                        \r\
   a *= mix(0.4, 1.0, float(dist) / u_buf_size.y);                            \r\
   a *= mask;                                                                 \r\
@@ -143,8 +190,8 @@ void start(void) {
   // Font texture
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-  glActiveTexture(GL_TEXTURE0);
   GLuint font_tx;
+  glActiveTexture(GL_TEXTURE0);
   glGenTextures(1, &font_tx);
   glBindTexture(GL_TEXTURE_2D, font_tx);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, FONT_TX_W, FONT_TX_H, 0, GL_RED,
@@ -155,12 +202,24 @@ void start(void) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glGenerateMipmap(GL_TEXTURE_2D);
 
+  GLuint sdf_tx;
+  glActiveTexture(GL_TEXTURE1);
+  glGenTextures(1, &sdf_tx);
+  glBindTexture(GL_TEXTURE_2D, sdf_tx);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, FONT_SDF_TX_W, FONT_SDF_TX_H, 0,
+      GL_RED, GL_UNSIGNED_BYTE, S_FONT_SDF_TX_DATA);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glGenerateMipmap(GL_TEXTURE_2D);
+
   // On screen text buffer
   glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
   glBufferData(GL_TEXTURE_BUFFER, BUF_W * BUF_H, 0, GL_DYNAMIC_DRAW); // Orphan
 
-  glActiveTexture(GL_TEXTURE1);
   GLuint tbo;
+  glActiveTexture(GL_TEXTURE2);
   glGenTextures(1, &tbo);
   glBindTexture(GL_TEXTURE_BUFFER, tbo);
   glTexBuffer(GL_TEXTURE_BUFFER, GL_R8UI, text_bo);
@@ -169,12 +228,15 @@ void start(void) {
   f32 glyph_size[2] = {(f32)FONT_TX_W / FONT_GLYPHS_W, (f32)FONT_TX_H / FONT_GLYPHS_H};
 
   glUniform1i(glGetUniformLocation(text_prog, "font_tx"), 0);
-  glUniform1i(glGetUniformLocation(text_prog, "u_text_buf"), 1);
+  glUniform1i(glGetUniformLocation(text_prog, "sdf_tx"), 1);
+  glUniform1i(glGetUniformLocation(text_prog, "u_text_buf"), 2);
   glUniform1ui(glGetUniformLocation(text_prog, "u_color"), TEXT_COLOR_RGBA);
   glUniform2i(glGetUniformLocation(text_prog, "u_buf_size"), BUF_W, BUF_H);
   glUniform2i(glGetUniformLocation(text_prog, "u_glyphs_count"), FONT_GLYPHS_W,
       FONT_GLYPHS_H);
   glUniform2f(glGetUniformLocation(text_prog, "u_resolution"), w.rect[2], w.rect[3]);
+  glUniform1i(glGetUniformLocation(text_prog, "u_sdf_spread"), FONT_SDF_SPREAD);
+  glUniform1f(glGetUniformLocation(text_prog, "u_sdf_bold"), SDF_BOLD);
 
   // Logic
 
@@ -211,7 +273,8 @@ void start(void) {
 
   i32 offset[2]         = {0};
   f32 dzoom             = 0.0f;
-  b32 is_log_view_snown = 1;
+  b32 is_log_view_shown = 1;
+  b32 is_sdf            = 0;
 
   while (1) {
     // dt bookkeeping
@@ -247,10 +310,19 @@ void start(void) {
 
     b32 is_up_grave = keycode_changed_to_up(KC_GRAVE, &old_kcs, &kcs);
     if (is_up_grave) {
-      is_log_view_snown = !is_log_view_snown;
+      is_log_view_shown = !is_log_view_shown;
     }
 
-    if (is_log_view_snown) {
+    b32 is_up_1 = keycode_changed_to_up(KC_1, &old_kcs, &kcs);
+    b32 is_up_2 = keycode_changed_to_up(KC_2, &old_kcs, &kcs);
+    if (is_up_1) {
+      is_sdf = 0;
+    }
+    if (is_up_2) {
+      is_sdf = 1;
+    }
+
+    if (is_log_view_shown) {
       rect[1] = MAX(rect[1] - 7000.0f * dt, 0.0f);
     } else {
       rect[1] = MIN(rect[1] + 7000.0f * dt, rect[3]);
@@ -260,11 +332,14 @@ void start(void) {
       log_delay += dt;
       if (log_delay > 0.2f) {
         log_delay = 0.0f;
-        text_line += 1;
-        u32 line_in_buf = text_line % BUF_H;
         if (text_line % 20 == 0) {
-          LOG_M(text_line, "Hold <SPACE> to Pause logging. Use <UP> and <DOWN> to scroll.");
+          LOG_M(text_line + 1, "Hold <SPACE> to Pause logging (Use <UP> and <DOWN> to scroll)");
+          LOG_M(text_line + 2, "PRESS <1> for bitmap font.");
+          LOG_M(text_line + 3, "PRESS <2> for SDF font.");
+          text_line += 3;
         } else {
+          text_line += 1;
+          u32 line_in_buf = text_line % BUF_H;
           LOG_M(text_line, (const char*)(msg + BUF_W * line_in_buf));
         }
       }
@@ -289,7 +364,8 @@ void start(void) {
       }
     }
 
-    dzoom = clampf32(dzoom, -0.5f, 0.5f);
+    // Allow more zoom to compare SDF to bitmap
+    dzoom = clampf32(dzoom, -0.5f, 10.0f);
     f32 zoom = 1.0f + dzoom;
 
     f32 glyph_size_zoomed[2];
@@ -312,11 +388,12 @@ void start(void) {
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
     glClear(GL_COLOR_BUFFER_BIT);
-    glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
+    glClearColor(BG_COLOR[0], BG_COLOR[1], BG_COLOR[2], BG_COLOR[3]);
 
     // Update text on the screen
     u32 log_line_last = log_atomic_load_last_line(&g_log);
 
+    glUniform1i(glGetUniformLocation(text_prog, "u_is_sdf"), is_sdf);
     glUniform4f(glGetUniformLocation(text_prog, "u_rect"), rect[0], rect[1], rect[2], rect[3]);
     glUniform2i(glGetUniformLocation(text_prog, "u_offset"), offset[0] + offset_zoom_x,
         offset[1]);
