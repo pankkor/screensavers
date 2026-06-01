@@ -276,6 +276,7 @@ void start(void) {
   f32 dsdf_bold         = 0.1f;
   b32 is_log_view_shown = 1;
   b32 is_sdf            = 1;
+  b32 is_sdf_old        = is_sdf;
 
   while (1) {
     // dt bookkeeping
@@ -366,10 +367,17 @@ void start(void) {
           LOG_M(text_line + 7, "Press '2' for bitmap font.");
           text_line += 7;
         } else {
-          text_line += 1;
           u32 line_in_buf = text_line % BUF_H;
-          LOG_M(text_line, (const char*)(msg + BUF_W * line_in_buf));
+          LOG_M(text_line + 1, (const char*)(msg + BUF_W * line_in_buf));
+          text_line += 1;
         }
+      }
+      if (is_sdf != is_sdf_old) {
+        LOG_M(text_line + 1,
+            is_sdf
+              ? "                            Font: SDF                                  "
+              : "                            Font: Bitmap                               ");
+        text_line += 1;
       }
     }
 
@@ -459,6 +467,7 @@ void start(void) {
     window_flush(&w);
 
     ++frame_num;
+    is_sdf_old = is_sdf;
   }
 
 shutdown:

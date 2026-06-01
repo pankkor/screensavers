@@ -189,7 +189,6 @@ void start(void) {
   print_cstr(STDOUT, "'\nGL_MAX_ARRAY_TEXTURE_LAYERS: ");
   print_i64(STDOUT, max_array_texture_layers);
   print_cstr(STDOUT, "\n\n");
-  print_cstr(STDOUT, "<Hold SPACE for SDF font>\n");
   print_cstr(STDOUT, "<Press ESC to exit>\n");
 
   GLuint text_prog = create_gl_shader_program(
