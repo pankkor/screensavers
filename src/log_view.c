@@ -29,7 +29,6 @@ enum {
 
 u32 TEXT_COLOR_RGBA = 0xCFDFFFFF; // 0xRRGGBBAA
 f32 BG_COLOR[4] = {0.2f, 0.2f, 0.2f, 1.0f};
-f32 SDF_BOLD = 0.0f;
 
 // --------------------------------------
 // GLSL
@@ -66,7 +65,7 @@ uniform ivec2 u_buf_window;                                                  \r\
 uniform ivec2 u_glyphs_count; // number of glyphs in atlas row and column    \r\
 uniform int u_line_last;                                                     \r\
 uniform int u_sdf_spread;     // spread used to generate SDF                 \r\
-uniform float u_sdf_bold;     // bolden in screen pixels                     \r\
+uniform float u_sdf_bold;     // bolden in SDF space                         \r\
 uniform int u_is_sdf;                                                        \r\
                                                                              \r\
 in vec2 f_win_pos;                                                           \r\
@@ -88,17 +87,20 @@ float font_bitmap(sampler2D r8_tx, vec2 uv) {                                \r\
                                                                              \r\
 // SDF with AA                                                               \r\
 float font_sdf(sampler2D r8_tx, vec2 uv, vec2 duvdx, vec2 duvdy) {           \r\
+  float to_sdf_space = 0.5 / u_sdf_spread; // to SDF space (-spread, +spread)\r\
   float d = textureGrad(r8_tx, uv, duvdx, duvdy).r;                          \r\
-  float sd_texels = (d - 0.5) * 2.0 * u_sdf_spread; // sdf in texels         \r\
+  float d_norm = d - 0.5; // [-0.5, 0.5] in SDF space                        \r\
                                                                              \r\
   vec2 tx_size = vec2(textureSize(r8_tx, 0));                                \r\
   float texels_per_px = length(vec2(                                         \r\
     length(duvdx * tx_size),                                                 \r\
     length(duvdy * tx_size)                                                  \r\
   ));                                                                        \r\
-  float sd_px = sd_texels / texels_per_px; // sdf in screen pixels           \r\
-                                                                             \r\
-  float a = clamp(sd_px + 0.5 + u_sdf_bold, 0.0, 1.0);                       \r\
+  float smoothing_ideal = texels_per_px * to_sdf_space;                      \r\
+  // Account for room left in texture spread after accounting for bold       \r\
+  float smoothing_max = 0.5 - abs(u_sdf_bold);                               \r\
+  float smoothing = min(smoothing_ideal, smoothing_max);                     \r\
+  float a = smoothstep(-smoothing, smoothing, d_norm + u_sdf_bold);          \r\
   return a;                                                                  \r\
 }                                                                            \r\
                                                                              \r\
@@ -212,7 +214,6 @@ void start(void) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glGenerateMipmap(GL_TEXTURE_2D);
 
   // On screen text buffer
   glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
@@ -236,7 +237,6 @@ void start(void) {
       FONT_GLYPHS_H);
   glUniform2f(glGetUniformLocation(text_prog, "u_resolution"), w.rect[2], w.rect[3]);
   glUniform1i(glGetUniformLocation(text_prog, "u_sdf_spread"), FONT_SDF_SPREAD);
-  glUniform1f(glGetUniformLocation(text_prog, "u_sdf_bold"), SDF_BOLD);
 
   // Logic
 
@@ -273,8 +273,9 @@ void start(void) {
 
   i32 offset[2]         = {0};
   f32 dzoom             = 0.0f;
+  f32 dsdf_bold         = 0.1f;
   b32 is_log_view_shown = 1;
-  b32 is_sdf            = 0;
+  b32 is_sdf            = 1;
 
   while (1) {
     // dt bookkeeping
@@ -316,10 +317,60 @@ void start(void) {
     b32 is_up_1 = keycode_changed_to_up(KC_1, &old_kcs, &kcs);
     b32 is_up_2 = keycode_changed_to_up(KC_2, &old_kcs, &kcs);
     if (is_up_1) {
-      is_sdf = 0;
+      is_sdf = 1;
     }
     if (is_up_2) {
-      is_sdf = 1;
+      is_sdf = 0;
+    }
+
+    if (kcs.e[KC_EQUAL]) {
+      if (kcs.e[KC_SHIFT]) {
+        dsdf_bold += 0.001;
+      } else {
+        dzoom += 0.01;
+      }
+    }
+    if (kcs.e[KC_MINUS]) {
+      if (kcs.e[KC_SHIFT]) {
+        dsdf_bold -= 0.001;
+      } else {
+        dzoom -= 0.01;
+      }
+    }
+
+    if (kcs.e[KC_LEFT]) {
+      offset[0] -= 1;
+    }
+    if (kcs.e[KC_RIGHT]) {
+      offset[0] += 1;
+    }
+    if (kcs.e[KC_UP]) {
+      offset[1] -= 1;
+    }
+    if (kcs.e[KC_DOWN]) {
+      offset[1] += 1;
+    }
+
+    // Don't add text when SPACE is held
+    if (!kcs.e[KC_SPACE]) {
+      log_delay += dt;
+      if (log_delay > 0.2f) {
+        log_delay = 0.0f;
+        if (text_line % 30 == 0) {
+          LOG_M(text_line + 1, "Hold <SPACE> to Pause logging.");
+          LOG_M(text_line + 2, "Press <ESC> to exit.");
+          LOG_M(text_line + 3, "Use <UP>, <DOWN>, <LEFT>, <RIGHT> to scroll.)");
+          LOG_M(text_line + 4, "Use '+' and '-' to zoom in and out.");
+          LOG_M(text_line + 5, "Use <SHIFT>+'+' and <SHIFT>+'-' to change boldness of SDF font.");
+          LOG_M(text_line + 6, "Press '1' for SDF font.");
+          LOG_M(text_line + 7, "Press '2' for bitmap font.");
+          text_line += 7;
+        } else {
+          text_line += 1;
+          u32 line_in_buf = text_line % BUF_H;
+          LOG_M(text_line, (const char*)(msg + BUF_W * line_in_buf));
+        }
+      }
     }
 
     if (is_log_view_shown) {
@@ -328,43 +379,9 @@ void start(void) {
       rect[1] = MIN(rect[1] + 7000.0f * dt, rect[3]);
     }
 
-    if (!kcs.e[KC_SPACE]) {
-      log_delay += dt;
-      if (log_delay > 0.2f) {
-        log_delay = 0.0f;
-        if (text_line % 20 == 0) {
-          LOG_M(text_line + 1, "Hold <SPACE> to Pause logging (Use <UP> and <DOWN> to scroll)");
-          LOG_M(text_line + 2, "PRESS <1> for bitmap font.");
-          LOG_M(text_line + 3, "PRESS <2> for SDF font.");
-          text_line += 3;
-        } else {
-          text_line += 1;
-          u32 line_in_buf = text_line % BUF_H;
-          LOG_M(text_line, (const char*)(msg + BUF_W * line_in_buf));
-        }
-      }
-    } else {
-      if (kcs.e[KC_LEFT]) {
-        offset[0] -= 1;
-      }
-      if (kcs.e[KC_RIGHT]) {
-        offset[0] += 1;
-      }
-      if (kcs.e[KC_UP]) {
-        offset[1] -= 1;
-      }
-      if (kcs.e[KC_DOWN]) {
-        offset[1] += 1;
-      }
-      if (kcs.e[KC_EQUAL]) {
-        dzoom += 0.01;
-      }
-      if (kcs.e[KC_MINUS]) {
-        dzoom -= 0.01;
-      }
-    }
+    dsdf_bold = clampf32(dsdf_bold, -0.2f, 0.2f);
+    f32 sdf_bold = 0.0f + dsdf_bold;
 
-    // Allow more zoom to compare SDF to bitmap
     dzoom = clampf32(dzoom, -0.5f, 10.0f);
     f32 zoom = 1.0f + dzoom;
 
@@ -380,8 +397,14 @@ void start(void) {
     i32 offset_zoom_x = MIN((BUF_W - buf_win[0]) * 0.5f + 0.5f, 0.0f);
 
     i32 margin[2] = {0};
-    offset[0] = clamp_minmax_i32(offset[0], -margin[0], MAX(BUF_W - buf_win[0], 0) + margin[0]);
-    offset[1] = clamp_minmax_i32(offset[1], MIN(-BUF_H + buf_win[1], 0) - margin[1], margin[1]);
+    offset[0] = clamp_minmax_i32(
+        offset[0],
+        -margin[0],
+        MAX(BUF_W - buf_win[0], 0) + margin[0]);
+    offset[1] = clamp_minmax_i32(
+        offset[1],
+        MIN(-BUF_H + buf_win[1], 0) - margin[1],
+        margin[1]);
 
     // Draw
     glEnable(GL_BLEND);
@@ -394,12 +417,14 @@ void start(void) {
     u32 log_line_last = log_atomic_load_last_line(&g_log);
 
     glUniform1i(glGetUniformLocation(text_prog, "u_is_sdf"), is_sdf);
-    glUniform4f(glGetUniformLocation(text_prog, "u_rect"), rect[0], rect[1], rect[2], rect[3]);
-    glUniform2i(glGetUniformLocation(text_prog, "u_offset"), offset[0] + offset_zoom_x,
-        offset[1]);
+    glUniform4f(glGetUniformLocation(text_prog, "u_rect"), rect[0], rect[1],
+        rect[2], rect[3]);
+    glUniform2i(glGetUniformLocation(text_prog, "u_offset"),
+        offset[0] + offset_zoom_x, offset[1]);
     glUniform1i(glGetUniformLocation(text_prog, "u_line_last"), log_line_last);
     glUniform2i(glGetUniformLocation(text_prog, "u_buf_window"), buf_win[0],
         buf_win[1]);
+    glUniform1f(glGetUniformLocation(text_prog, "u_sdf_bold"), sdf_bold);
 
     // OpenGL can't map buffer
     glBindBuffer(GL_TEXTURE_BUFFER, text_bo);

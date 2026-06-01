@@ -47,9 +47,10 @@ f32 SDF_BOLD = 0.2f;
 
 // Text that only fits on the screen
 ALIGNED(16) u8 s_text[TEXT_W * TEXT_H] =
-"                                                                                "
 "Hello Bitmap Font!                                                              "
-"1234567890-=`~!@#$%^&*(),.<>:\"/;'[]{}\\|                                         "
+"Press <1> for SDF font.                                                         "
+"Press <2> for Bitmap font.                                                      "
+"                                         1234567890-=`~!@#$%^&*(),.<>:\"/;'[]{}\\|"
 ;
 
 u8 s_luminance[12] = ".,-~:;=!*#$@"; // don't keep null terminator
@@ -124,6 +125,29 @@ vec4 font_sdf(sampler2D r8_tx, vec2 uv, vec2 duvdx, vec2 duvdy, vec4 color) {\r\
   return a * color;                                                          \r\
 }                                                                            \r\
                                                                              \r\
+float font_bitmap(sampler2D r8_tx, vec2 uv) {                                \r\
+  return texture(r8_tx, uv).r;                                               \r\
+}                                                                            \r\
+                                                                             \r\
+// SDF with AA                                                               \r\
+float font_sdf(sampler2D r8_tx, vec2 uv, vec2 duvdx, vec2 duvdy) {           \r\
+  float to_sdf_space = 0.5 / u_sdf_spread; // to SDF space (-spread, +spread)\r\
+  float d = textureGrad(r8_tx, uv, duvdx, duvdy).r;                          \r\
+  float d_norm = d - 0.5; // [-0.5, 0.5] in SDF space                        \r\
+                                                                             \r\
+  vec2 tx_size = vec2(textureSize(r8_tx, 0));                                \r\
+  float texels_per_px = length(vec2(                                         \r\
+    length(duvdx * tx_size),                                                 \r\
+    length(duvdy * tx_size)                                                  \r\
+  ));                                                                        \r\
+  float smoothing_ideal = texels_per_px * to_sdf_space;                      \r\
+  // Account for room left in texture spread after accounting for bold       \r\
+  float smoothing_max = 0.5 - abs(u_sdf_bold);                               \r\
+  float smoothing = min(smoothing_ideal, smoothing_max);                     \r\
+  float a = smoothstep(-smoothing, smoothing, d_norm + u_sdf_bold);          \r\
+  return a;                                                                  \r\
+}                                                                            \r\
+                                                                             \r\
 void main(void) {                                                            \r\
   vec2 cell = f_uv * u_buf_size;                                             \r\
   ivec2 buf_pos = ivec2(cell);                                               \r\
@@ -136,11 +160,13 @@ void main(void) {                                                            \r\
   vec2 duvdx = dFdx(cell) / vec2(u_glyphs_count);                            \r\
   vec2 duvdy = dFdy(cell) / vec2(u_glyphs_count);                            \r\
                                                                              \r\
+  float a;                                                                   \r\
   if (u_is_sdf == 0) {                                                       \r\
-    frag_col = font_bitmap(font_tx, uv, f_color);                            \r\
+    a = font_bitmap(font_tx, uv);                                            \r\
   } else {                                                                   \r\
-    frag_col = font_sdf(sdf_tx, uv, duvdx, duvdy, f_color);                  \r\
+    a = font_sdf(sdf_tx, uv, duvdx, duvdy);                                  \r\
   }                                                                          \r\
+  frag_col = f_color * a;                                                    \r\
 }                                                                            \r\
 ";
 
@@ -293,13 +319,28 @@ void start(void) {
     }
 
     // Hold space for SDF font
-    is_sdf = loop.keycodes.e[KC_SPACE];
+    b32 is_down_1 = loop.keycodes.e[KC_1];
+    b32 is_down_2 = loop.keycodes.e[KC_2];
+    if (is_down_1) {
+      is_sdf = 1;
+    }
+    if (is_down_2) {
+      is_sdf = 0;
+    }
+
+    // Text
+    s_text[ 6] = is_sdf ? ' ' : 'B';
+    s_text[ 7] = is_sdf ? 'S' : 'i';
+    s_text[ 8] = is_sdf ? 'D' : 't';
+    s_text[ 9] = is_sdf ? 'F' : 'm';
+    s_text[10] = is_sdf ? ' ' : 'a';
+    s_text[11] = is_sdf ? ' ' : 'p';
 
     // Animate background
     bg_anim_t = fmodf32(bg_anim_t + dt, 1.0f);
 
     for (i32 x = 0; x < TEXT_W; ++x) {
-      for (i32 y = 3; y < TEXT_H; ++y) {
+      for (i32 y = 4; y < TEXT_H; ++y) {
         f32 l = 0.25f * cosf32(bg_anim_t + 0.02f * x) + 0.25f;
         f32 k = 0.25f * sinf32(bg_anim_t + 0.02f * y) + 0.25f;
         i32 idx = (l + k) * (ARRAY_COUNT(s_luminance) - 1);
