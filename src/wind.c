@@ -149,7 +149,7 @@ void start(void) {
     s_sprite_frag_src
   );
 
-  f32 aspect  = w.rect[2] / w.rect[3];
+  f32 aspect  = (f32)w.view_size_px[0] / w.view_size_px[1];
   f32 iaspect = 1.0f / aspect;
 
   f32 clear_col[4]  = {0};
@@ -177,7 +177,7 @@ void start(void) {
 
   glUniform1f(glGetUniformLocation(sprite_prog, "iaspect"), iaspect);
   glUniform2f(glGetUniformLocation(sprite_prog, "resolution"),
-      w.rect[2], w.rect[3]);
+      w.view_size_px[0], w.view_size_px[1]);
 
   // Vertices
   glBindBuffer(GL_ARRAY_BUFFER, vert_bo);
@@ -346,8 +346,11 @@ void start(void) {
     clear_col[2]  = lerpf32(ntemp, 0.2f, 0.1f);
     clear_col[3]  = 0.25f;
 
+    glViewport(0, 0, w.view_size_px[0], w.view_size_px[1]);
+
     glClearColor(clear_col[0], clear_col[1], clear_col[2], clear_col[3]);
     glClear(GL_COLOR_BUFFER_BIT);
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 

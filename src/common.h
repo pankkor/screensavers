@@ -25,6 +25,9 @@ typedef unsigned long int   size_t; // libc compatibility type
 
 #define INLINE              inline __attribute__((always_inline))
 #define NORETURN            __attribute__((noreturn))
+#define NAKED               __attribute__((naked)) // no prologue/epilogue
+#define LIKELY(x)           (__builtin_expect(!!(x), 1))
+#define UNLIKELY(x)         (__builtin_expect(!!(x), 0))
 #define ALIGNED(x)          __attribute__((aligned(x)))
 #define ARRAY_COUNT(x)      (i64)(sizeof(x) / sizeof(x[0]))
 #define static_assert       _Static_assert
@@ -1197,7 +1200,7 @@ INLINE static void print_ln(i32 fd) {
     msg "\n")
 
 INLINE static void expect_msg(i32 condition, const char *msg) {
-  if (!condition) {
+  if UNLIKELY(!condition) {
     print_cstr(STDERR, msg);
     debugbreak();
   }
@@ -1208,7 +1211,7 @@ INLINE static void expect_msg(i32 condition, const char *msg) {
     msg "\n")
 
 INLINE static void warn_if_msg(i32 condition, const char *msg) {
-  if (condition) {
+  if UNLIKELY(condition) {
     print_cstr(STDERR, msg);
   }
 }
@@ -1257,16 +1260,33 @@ NORETURN void __stack_chk_fail(void) {
   __builtin_trap();
 }
 
-// Disable Darwin stack checks with -fno-stack-check
-void __chkstk_darwin(size_t size) {
-  // Touch memory in page-sized increments to probe for guard pages
-  volatile u8 *ptr = (volatile u8 *)&size;
-
-  for (u64 offset = OS_PAGE_SIZE; offset < size; offset += OS_PAGE_SIZE) {
-    ptr -= OS_PAGE_SIZE;
-    volatile u8 c = *ptr;
-    (void)c;
-  }
+// OS grows stack lazily, by placing guard page below the commited stack.
+// That page, when touched generates a fault which, which extends the stack
+// or stack overflows.
+// When function stack is big, it can increment Stack Pointer (SP) too much,
+// bypassing guard page. That's when compiler inserts __chkstk_darwin in prologue,
+// which has to probe N pages.
+// Darwin ABI:
+//   x9    - size. Number of bytes function is subtracting from SP in prologue.
+//   x0-x7 - hold function's arguments.
+//   All registers must be preserved.
+// Read 1 byte in [sp - size, sp)
+// the frame is established. Probes one 4 KB step at a time so a
+// 16 KB guard page can never be skipped.
+// OPTIONAL: Disable Darwin stack checks with -fno-stack-check
+NAKED void __chkstk_darwin(void) {
+  __asm__ volatile(
+    "stp  x10, x11, [sp, #-16]!\n"// sp -= 16, then push x10, x11 to the stack;
+    "add  x10, sp, #16\n"         // x10 = sp + 16; get caller's SP back;
+    "mov  x11, x9\n"              // x11 = size;
+    "1:\n"                        // do {
+    "sub  x10, x10, #16384\n"     //   x10 -= 16384; (16KB Page Size)
+    "ldr  xzr, [x10]\n"           //   load [x10] to zero register;
+    "subs x11, x11, #16384\n"     //   x11 -= 16384;
+    "b.gt 1b\n"                   // } until x11 <= 0;
+    "ldp  x10, x11, [sp], #16\n"  // load x10, x11 back and sp += 16;
+    "ret\n"
+  );
 }
 
 // -----------------------------------------------------------------------------
@@ -1510,7 +1530,8 @@ struct window {
   CGSConnectionID   cid;
   CGWindowID        wid;
   CGLContextObj     glctx;
-  f32               rect[4]; // x, y, w, h
+  u32               rect_pts[4];      // x, y, w, h (in points)
+  u32               view_size_px[2];  // w, h       (in pixels)
 };
 
 // Init transparent window and OpenGL context
@@ -1518,9 +1539,10 @@ static void window_init(struct window *w, b32 is_vsync, b32 is_full_screen) {
   CGDirectDisplayID did;
   CGWindowID        wid;
   CGSConnectionID   cid;
+  CGDisplayModeRef  dmode;
   CGError           cg_err;
   CGLError          cgl_err;
-  CGRect            view_rect;
+  CGRect            view_rect_pts;
   CGRect            win_rect;
 
   cid = CGSMainConnectionID();
@@ -1529,8 +1551,18 @@ static void window_init(struct window *w, b32 is_vsync, b32 is_full_screen) {
   did = CGMainDisplayID();
   EXPECT(did, "CGMainDisplayID() failed\n");
 
-  win_rect  = CGDisplayBounds(did);
-  view_rect = (CGRect){.size = win_rect.size};
+  u64 dmode_px[2];
+  u64 dmode_pts[2];
+  dmode = CGDisplayCopyDisplayMode(did);
+  EXPECT(dmode, "CGDisplayCopyDisplayMode() failed\n");
+  dmode_px[0]   = CGDisplayModeGetPixelWidth(dmode);
+  dmode_px[1]   = CGDisplayModeGetPixelHeight(dmode);
+  dmode_pts[0]  = CGDisplayModeGetWidth(dmode);
+  dmode_pts[1]  = CGDisplayModeGetHeight(dmode);
+  CFRelease(dmode);
+
+  win_rect      = CGDisplayBounds(did);
+  view_rect_pts = (CGRect){.size = {dmode_pts[0], dmode_pts[1]}};
 
   if (is_full_screen) {
     cg_err = CGDisplayCapture(did);
@@ -1554,7 +1586,7 @@ static void window_init(struct window *w, b32 is_vsync, b32 is_full_screen) {
 
     // clear windows surface
     CGContextRef cgctx = CGWindowContextCreate(cid, wid, 0);
-    CGContextClearRect(cgctx, view_rect);
+    CGContextClearRect(cgctx, view_rect_pts);
     CGContextRelease(cgctx);
 
     b32 is_dock_and_desktop_control_visile = 0;
@@ -1617,24 +1649,18 @@ static void window_init(struct window *w, b32 is_vsync, b32 is_full_screen) {
   CGLDestroyPixelFormat(pixelFormat);
   EXPECT(glctx, "CGLCreateContext() failed\n");
 
-  GLint vsync_enabled = 1;
+  GLint vsync_enabled = is_vsync;
   CGLSetParameter(glctx, kCGLCPSwapInterval, &vsync_enabled);
 
   GLint surface_opacity = 0;
   CGLSetParameter(glctx, kCGLCPSurfaceOpacity, &surface_opacity);
 
-  CGSSurfaceID sid;
-  cg_err = CGSAddSurface(cid, wid, &sid);
-  EXPECT(!cg_err, "CGSAddSurface() failed\n");
+  GLint view_size_px[2] = { dmode_px[0], dmode_px[1] };
+  cgl_err = CGLSetParameter(glctx, kCGLCPSurfaceBackingSize, view_size_px);
+  EXPECT(!cgl_err, "CGLSetParameter(kCGLCPSurfaceBackingSize) failed\n");
 
-  cg_err = CGSSetSurfaceBounds(cid, wid, sid, view_rect);
-  EXPECT(!cg_err, "CGSSetSurfaceBounds() failed\n");
-
-  cg_err = CGSOrderSurface(cid, wid, sid, 1, 0);
-  EXPECT(!cg_err, "CGSOrderSurface() failed\n");
-
-  cgl_err = CGLSetSurface(glctx, cid, wid, sid);
-  EXPECT(!cgl_err, "CGLSetSurface() failed\n");
+  CGLEnable(glctx, kCGLCESurfaceBackingSize);
+  EXPECT(!cgl_err, "CGLEnable(kCGLCESurfaceBackingSize) failed\n");
 
   GLint is_drawable = 0;
   cgl_err = CGLGetParameter(glctx, kCGLCPHasDrawable, &is_drawable);
@@ -1647,16 +1673,34 @@ static void window_init(struct window *w, b32 is_vsync, b32 is_full_screen) {
   CGLSetParameter(glctx, kCGLCPSwapInterval, &swap_interval);
   EXPECT(!cgl_err, "CGLSetParameter() failed\n");
 
+  // Add CGSSurface with OpenGL context
+  CGSSurfaceID sid;
+  cg_err = CGSAddSurface(cid, wid, &sid);
+  EXPECT(!cg_err, "CGSAddSurface() failed\n");
+
+  cg_err = CGSSetSurfaceBounds(cid, wid, sid, view_rect_pts);
+  EXPECT(!cg_err, "CGSSetSurfaceBounds() failed\n");
+
+  cg_err = CGSOrderSurface(cid, wid, sid, 1, 0);
+  EXPECT(!cg_err, "CGSOrderSurface() failed\n");
+
+  cgl_err = CGLSetSurface(glctx, cid, wid, sid);
+  EXPECT(!cgl_err, "CGLSetSurface() failed\n");
+
   *w = (struct window){
-    .did    = did,
-    .cid    = cid,
-    .wid    = wid,
-    .glctx  = glctx,
-    .rect   = {
+    .did          = did,
+    .cid          = cid,
+    .wid          = wid,
+    .glctx        = glctx,
+    .rect_pts     = {
       win_rect.origin.x,
       win_rect.origin.y,
       win_rect.size.width,
       win_rect.size.height
+    },
+    .view_size_px = {
+      view_size_px[0],
+      view_size_px[1],
     },
   };
 }

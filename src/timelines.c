@@ -43,7 +43,7 @@ void start(void) {
   b32 debug_frame_mode = 0;
 
   struct timelines_state timelines_state = {
-    .resolution = { w.rect[2], w.rect[3] }
+    .resolution = { w.view_size_px[0], w.view_size_px[1] }
   };
 
   struct timelines_gpu timelines = {0};
@@ -140,11 +140,13 @@ void start(void) {
     };
 
     // Draw
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    glViewport(0, 0, w.view_size_px[0], w.view_size_px[1]);
 
     glClearColor(0.8f, 0.8f, 0.8f, 0.8f);
     glClear(GL_COLOR_BUFFER_BIT);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
     queries_gpu_query_begin(&qs, frame_num);
 

@@ -9,13 +9,21 @@
 
 #include "common.h"
 
-#include "res_font_256.h"
-#include "res_font_square_sdf_1024.h"
-#include "res_font_nonsquare_sdf_1024.h"
 #include "res_ascii_anim.h"
 
-#if 1
-// Use res_font_square_sdf_1024.h
+#if 0
+#include "res_font_256.h"
+#else
+#include "res_font_roboto_1024.h"
+#define FONT_TX_W           FONT_ROBOTO_TX_W
+#define FONT_TX_H           FONT_ROBOTO_TX_H
+#define FONT_GLYPHS_W       FONT_ROBOTO_GLYPHS_W
+#define FONT_GLYPHS_H       FONT_ROBOTO_GLYPHS_H
+#define s_font_tx_data      s_font_roboto_tx_data
+#endif
+
+#if 0
+#include "res_font_square_sdf_1024.h"
 #define FONT_SDF_TX_W       FONT_SQUARE_SDF_TX_W
 #define FONT_SDF_TX_H       FONT_SQUARE_SDF_TX_H
 #define FONT_SDF_GLYPHS_W   FONT_SQUARE_SDF_GLYPHS_W
@@ -23,13 +31,13 @@
 #define FONT_SDF_SPREAD     FONT_SQUARE_SDF_SPREAD
 #define S_FONT_SDF_TX_DATA  s_font_square_sdf_tx_data
 #else
-// Use res_font_nonsquare_sdf_1024.h
-#define FONT_SDF_TX_W       FONT_NONSQUARE_SDF_TX_W
-#define FONT_SDF_TX_H       FONT_NONSQUARE_SDF_TX_H
-#define FONT_SDF_GLYPHS_W   FONT_NONSQUARE_SDF_GLYPHS_W
-#define FONT_SDF_GLYPHS_H   FONT_NONSQUARE_SDF_GLYPHS_H
-#define FONT_SDF_SPREAD     FONT_NONSQUARE_SDF_SPREAD
-#define S_FONT_SDF_TX_DATA  s_font_nonsquare_sdf_tx_data
+#include "res_font_roboto_sdf_1024.h"
+#define FONT_SDF_TX_W       FONT_ROBOTO_SDF_TX_W
+#define FONT_SDF_TX_H       FONT_ROBOTO_SDF_TX_H
+#define FONT_SDF_GLYPHS_W   FONT_ROBOTO_SDF_GLYPHS_W
+#define FONT_SDF_GLYPHS_H   FONT_ROBOTO_SDF_GLYPHS_H
+#define FONT_SDF_SPREAD     FONT_ROBOTO_SDF_SPREAD
+#define S_FONT_SDF_TX_DATA  s_font_roboto_sdf_tx_data
 #endif
 
 static_assert(FONT_GLYPHS_W == FONT_SDF_GLYPHS_W);
@@ -43,7 +51,7 @@ enum {
 
 u32 TEXT_COLOR_RGBA = 0xCFDFFFFF; // 0xRRGGBBAA
 f32 BG_COLOR[4] = {0.2f, 0.2f, 0.2f, 1.0f};
-f32 SDF_BOLD = 0.2f;
+f32 SDF_BOLD = 0.1f;
 
 // Text that only fits on the screen
 ALIGNED(16) u8 s_text[TEXT_W * TEXT_H] =
@@ -105,28 +113,8 @@ uniform int u_is_sdf;                                                        \r\
                                                                              \r\
 out vec4 frag_col;                                                           \r\
                                                                              \r\
-vec4 font_bitmap(sampler2D r8_tx, vec2 uv, vec4 color) {                     \r\
-  return color * texture(r8_tx, uv).r;                                       \r\
-}                                                                            \r\
-                                                                             \r\
-// SDF with AA                                                               \r\
-vec4 font_sdf(sampler2D r8_tx, vec2 uv, vec2 duvdx, vec2 duvdy, vec4 color) {\r\
-  float d = textureGrad(r8_tx, uv, duvdx, duvdy).r;                          \r\
-  float sd_texels = (d - 0.5) * 2.0 * u_sdf_spread; // sdf in texels         \r\
-                                                                             \r\
-  vec2 tx_size = vec2(textureSize(r8_tx, 0));                                \r\
-  float texels_per_px = length(vec2(                                         \r\
-    length(duvdx * tx_size),                                                 \r\
-    length(duvdy * tx_size)                                                  \r\
-  ));                                                                        \r\
-  float sd_px = sd_texels / texels_per_px; // sdf in screen pixels           \r\
-                                                                             \r\
-  float a = clamp(sd_px + 0.5 + u_sdf_bold, 0.0, 1.0);                       \r\
-  return a * color;                                                          \r\
-}                                                                            \r\
-                                                                             \r\
-float font_bitmap(sampler2D r8_tx, vec2 uv) {                                \r\
-  return texture(r8_tx, uv).r;                                               \r\
+float font_bitmap(sampler2D r8_tx, vec2 uv, vec2 duvdx, vec2 duvdy) {        \r\
+  return textureGrad(r8_tx, uv, duvdx, duvdy).r;                             \r\
 }                                                                            \r\
                                                                              \r\
 // SDF with AA                                                               \r\
@@ -153,7 +141,7 @@ void main(void) {                                                            \r\
   ivec2 buf_pos = ivec2(cell);                                               \r\
   int buf_idx = buf_pos.x + buf_pos.y * u_buf_size.x;                        \r\
   uint c = texelFetch(u_text_buf, buf_idx).r;                                \r\
-  vec2 glyph_pos = vec2(c % u_glyphs_count.x, c / u_glyphs_count.y);         \r\
+  vec2 glyph_pos = vec2(c % u_glyphs_count.x, c / u_glyphs_count.x);         \r\
   vec2 uv = (glyph_pos + fract(cell)) / u_glyphs_count;                      \r\
                                                                              \r\
   // Cell bound UV derivatives                                               \r\
@@ -162,7 +150,7 @@ void main(void) {                                                            \r\
                                                                              \r\
   float a;                                                                   \r\
   if (u_is_sdf == 0) {                                                       \r\
-    a = font_bitmap(font_tx, uv);                                            \r\
+    a = font_bitmap(font_tx, uv, duvdx, duvdy);                              \r\
   } else {                                                                   \r\
     a = font_sdf(sdf_tx, uv, duvdx, duvdy);                                  \r\
   }                                                                          \r\
@@ -196,7 +184,7 @@ void start(void) {
     s_text_frag_src
   );
 
-  f32 aspect  = w.rect[2] / w.rect[3];
+  f32 aspect  = (f32)w.view_size_px[0] / w.view_size_px[1];
   f32 iaspect = 1.0f / aspect;
   f32 size[2] = { 1.0f, 1.0f };
   size[0] = 1.0f * iaspect;
@@ -223,7 +211,7 @@ void start(void) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glGenerateMipmap(GL_TEXTURE_2D);
+  // No mipmaps for bitmap font atlas
 
   GLuint sdf_tx;
   glActiveTexture(GL_TEXTURE1);
@@ -235,10 +223,11 @@ void start(void) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  // No mipmaps for SDF font atlas
 
   // On screen text buffer
   glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
-  glBufferData(GL_TEXTURE_BUFFER, TEXT_W * TEXT_H, s_text, GL_STREAM_DRAW);
+  glBufferData(GL_TEXTURE_BUFFER, TEXT_W * TEXT_H, s_text, GL_DYNAMIC_DRAW);
 
   GLuint tbo;
   glActiveTexture(GL_TEXTURE2);
@@ -363,11 +352,13 @@ void start(void) {
     // Draw
     glUniform1i(glGetUniformLocation(text_prog, "u_is_sdf"), is_sdf);
 
+    glViewport(0, 0, w.view_size_px[0], w.view_size_px[1]);
+
+    glClearColor(BG_COLOR[0], BG_COLOR[1], BG_COLOR[2], BG_COLOR[3]);
+    glClear(GL_COLOR_BUFFER_BIT);
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-
-    glClear(GL_COLOR_BUFFER_BIT);
-    glClearColor(BG_COLOR[0], BG_COLOR[1], BG_COLOR[2], BG_COLOR[3]);
 
     // Update text on the screen
     glBindBuffer(GL_TEXTURE_BUFFER, text_bo);

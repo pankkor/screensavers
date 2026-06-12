@@ -197,7 +197,7 @@ void start(void) {
     s_text_frag_src
   );
 
-  f32 aspect  = w.rect[2] / w.rect[3];
+  f32 aspect  = (f32)w.view_size_px[0] / w.view_size_px[1];
   f32 iaspect = 1.0f / aspect;
   f32 size[2] = { 1.0f, 1.0f };
   size[0] = 1.0f * iaspect;
@@ -295,11 +295,13 @@ void start(void) {
     donut(turns);
 
     // Draw
+    glViewport(0, 0, w.view_size_px[0], w.view_size_px[1]);
+
+    glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-
-    glClear(GL_COLOR_BUFFER_BIT);
-    glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
 
     // Update text on the screen
     glBindBuffer(GL_TEXTURE_BUFFER, text_bo);

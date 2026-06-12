@@ -223,7 +223,7 @@ void start(void) {
     s_sprite_frag_src
   );
 
-  f32 aspect  = w.rect[2] / w.rect[3];
+  f32 aspect  = (f32)w.view_size_px[0] / w.view_size_px[1];
   f32 iaspect = 1.0f / aspect;
 
   GLuint vao;
@@ -602,8 +602,11 @@ void start(void) {
     }
 
     // Draw
+    glViewport(0, 0, w.view_size_px[0], w.view_size_px[1]);
+
     glClearColor(0.0f, 0.0f, 0.0f, fade_out_a);
     glClear(GL_COLOR_BUFFER_BIT);
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
 

@@ -252,7 +252,7 @@ void start(void) {
     s_sprite_frag_src
   );
 
-  f32 aspect  = w.rect[2] / w.rect[3];
+  f32 aspect  = (f32)w.view_size_px[0] / w.view_size_px[1];
   f32 iaspect = 1.0f / aspect;
 
   GLuint vao;
@@ -837,12 +837,14 @@ void start(void) {
     }
 
     // Draw
+    glViewport(0, 0, w.view_size_px[0], w.view_size_px[1]);
+
+    glClearColor(0.34, 0.44f, 0.25, fade_in_a);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_DEPTH_TEST);
-
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glClearColor(0.34, 0.44f, 0.25, fade_in_a);
 
     // Draw sprites
     glBindBuffer(GL_ARRAY_BUFFER, pos_bo);

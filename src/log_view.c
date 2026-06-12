@@ -9,15 +9,34 @@
 
 #include "common.h"
 
+#if 0
 #include "res_font_256.h"
-#include "res_font_square_sdf_1024.h"
+#else
+#include "res_font_roboto_1024.h"
+#define FONT_TX_W           FONT_ROBOTO_TX_W
+#define FONT_TX_H           FONT_ROBOTO_TX_H
+#define FONT_GLYPHS_W       FONT_ROBOTO_GLYPHS_W
+#define FONT_GLYPHS_H       FONT_ROBOTO_GLYPHS_H
+#define s_font_tx_data      s_font_roboto_tx_data
+#endif
 
+#if 0
+#include "res_font_square_sdf_1024.h"
 #define FONT_SDF_TX_W       FONT_SQUARE_SDF_TX_W
 #define FONT_SDF_TX_H       FONT_SQUARE_SDF_TX_H
 #define FONT_SDF_GLYPHS_W   FONT_SQUARE_SDF_GLYPHS_W
 #define FONT_SDF_GLYPHS_H   FONT_SQUARE_SDF_GLYPHS_H
 #define FONT_SDF_SPREAD     FONT_SQUARE_SDF_SPREAD
 #define S_FONT_SDF_TX_DATA  s_font_square_sdf_tx_data
+#else
+#include "res_font_roboto_sdf_1024.h"
+#define FONT_SDF_TX_W       FONT_ROBOTO_SDF_TX_W
+#define FONT_SDF_TX_H       FONT_ROBOTO_SDF_TX_H
+#define FONT_SDF_GLYPHS_W   FONT_ROBOTO_SDF_GLYPHS_W
+#define FONT_SDF_GLYPHS_H   FONT_ROBOTO_SDF_GLYPHS_H
+#define FONT_SDF_SPREAD     FONT_ROBOTO_SDF_SPREAD
+#define S_FONT_SDF_TX_DATA  s_font_roboto_sdf_tx_data
+#endif
 
 static_assert(FONT_GLYPHS_W == FONT_SDF_GLYPHS_W);
 static_assert(FONT_GLYPHS_H == FONT_SDF_GLYPHS_H);
@@ -81,8 +100,8 @@ vec4 rgba2vec4(uint rgba) {                                                  \r\
     (rgba >> 8) & 0xFFu, rgba & 0xFFu) / 255.0;                              \r\
 }                                                                            \r\
                                                                              \r\
-float font_bitmap(sampler2D r8_tx, vec2 uv) {                                \r\
-  return texture(r8_tx, uv).r;                                               \r\
+float font_bitmap(sampler2D r8_tx, vec2 uv, vec2 duvdx, vec2 duvdy) {        \r\
+  return textureGrad(r8_tx, uv, duvdx, duvdy).r;                             \r\
 }                                                                            \r\
                                                                              \r\
 // SDF with AA                                                               \r\
@@ -123,7 +142,7 @@ void main(void) {                                                            \r\
   int buf_idx = buf_row + buf_line * u_buf_size.x;                           \r\
   uint c = texelFetch(u_text_buf, buf_idx).r;                                \r\
                                                                              \r\
-  vec2 glyph_pos = vec2(c % u_glyphs_count.x, c / u_glyphs_count.y);         \r\
+  vec2 glyph_pos = vec2(c % u_glyphs_count.x, c / u_glyphs_count.x);         \r\
   vec2 uv = (glyph_pos + fract(win_pos)) / u_glyphs_count;                   \r\
                                                                              \r\
   // Cell bound UV derivatives                                               \r\
@@ -132,7 +151,7 @@ void main(void) {                                                            \r\
                                                                              \r\
   float a;                                                                   \r\
   if (u_is_sdf == 0) {                                                       \r\
-    a = font_bitmap(font_tx, uv);                                            \r\
+    a = font_bitmap(font_tx, uv, duvdx, duvdy);                              \r\
   } else {                                                                   \r\
     a = font_sdf(sdf_tx, uv, duvdx, duvdy);                                  \r\
   }                                                                          \r\
@@ -175,7 +194,7 @@ void start(void) {
     s_text_frag_src
   );
 
-  f32 aspect  = w.rect[2] / w.rect[3];
+  f32 aspect  = (f32)w.view_size_px[0] / w.view_size_px[1];
   f32 iaspect = 1.0f / aspect;
   f32 size[2] = { 1.0f, 1.0f };
   size[0] = 1.0f * iaspect;
@@ -202,7 +221,7 @@ void start(void) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glGenerateMipmap(GL_TEXTURE_2D);
+  // No mipmaps for bitmap font atlas
 
   GLuint sdf_tx;
   glActiveTexture(GL_TEXTURE1);
@@ -214,10 +233,11 @@ void start(void) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  // No mipmaps for SDF font atlas
 
   // On screen text buffer
   glBindBuffer(GL_TEXTURE_BUFFER, text_bo);
-  glBufferData(GL_TEXTURE_BUFFER, BUF_W * BUF_H, 0, GL_DYNAMIC_DRAW); // Orphan
+  glBufferData(GL_TEXTURE_BUFFER, BUF_W * BUF_H, 0, GL_DYNAMIC_DRAW);
 
   GLuint tbo;
   glActiveTexture(GL_TEXTURE2);
@@ -225,8 +245,7 @@ void start(void) {
   glBindTexture(GL_TEXTURE_BUFFER, tbo);
   glTexBuffer(GL_TEXTURE_BUFFER, GL_R8UI, text_bo);
 
-  f32 rect[4] = {0, 0, w.rect[2], w.rect[3]};
-  f32 glyph_size[2] = {(f32)FONT_TX_W / FONT_GLYPHS_W, (f32)FONT_TX_H / FONT_GLYPHS_H};
+  f32 rect[4] = {0, 0, w.view_size_px[0], w.view_size_px[1]};
 
   glUniform1i(glGetUniformLocation(text_prog, "font_tx"), 0);
   glUniform1i(glGetUniformLocation(text_prog, "sdf_tx"), 1);
@@ -235,7 +254,7 @@ void start(void) {
   glUniform2i(glGetUniformLocation(text_prog, "u_buf_size"), BUF_W, BUF_H);
   glUniform2i(glGetUniformLocation(text_prog, "u_glyphs_count"), FONT_GLYPHS_W,
       FONT_GLYPHS_H);
-  glUniform2f(glGetUniformLocation(text_prog, "u_resolution"), w.rect[2], w.rect[3]);
+  glUniform2f(glGetUniformLocation(text_prog, "u_resolution"), rect[2], rect[3]);
   glUniform1i(glGetUniformLocation(text_prog, "u_sdf_spread"), FONT_SDF_SPREAD);
 
   // Logic
@@ -395,6 +414,11 @@ void start(void) {
 
     f32 glyph_size_zoomed[2];
     i32 buf_win[2];
+    f32 glyph_size[2] = {
+      is_sdf ? (f32)FONT_SDF_TX_W / FONT_SDF_GLYPHS_W : (f32)FONT_TX_W / FONT_GLYPHS_W,
+      is_sdf ? (f32)FONT_SDF_TX_H / FONT_SDF_GLYPHS_H : (f32)FONT_TX_H / FONT_GLYPHS_H,
+    };
+
     f32 glyph_scale = zoom * rect[2] / BUF_W / glyph_size[0];
     glyph_size_zoomed[0] = glyph_size[0] * glyph_scale;
     glyph_size_zoomed[1] = glyph_size[1] * glyph_scale;
@@ -415,11 +439,13 @@ void start(void) {
         margin[1]);
 
     // Draw
+    glViewport(0, 0, w.view_size_px[0], w.view_size_px[1]);
+
+    glClearColor(BG_COLOR[0], BG_COLOR[1], BG_COLOR[2], BG_COLOR[3]);
+    glClear(GL_COLOR_BUFFER_BIT);
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-
-    glClear(GL_COLOR_BUFFER_BIT);
-    glClearColor(BG_COLOR[0], BG_COLOR[1], BG_COLOR[2], BG_COLOR[3]);
 
     // Update text on the screen
     u32 log_line_last = log_atomic_load_last_line(&g_log);
