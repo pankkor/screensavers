@@ -9,18 +9,15 @@
 
 #include "common.h"
 
-#if 0
-#include "res_font_256.h"
-#else
-#include "res_font_roboto_1024.h"
-#define FONT_TX_W           FONT_ROBOTO_TX_W
-#define FONT_TX_H           FONT_ROBOTO_TX_H
-#define FONT_GLYPHS_W       FONT_ROBOTO_GLYPHS_W
-#define FONT_GLYPHS_H       FONT_ROBOTO_GLYPHS_H
-#define s_font_tx_data      s_font_roboto_tx_data
-#endif
+#if 0 // Square monospace font (glyph.width == glyph.height)
 
-#if 0
+#include "res_font_square_1024.h"
+#define FONT_TX_W           FONT_SQUARE_TX_W
+#define FONT_TX_H           FONT_SQUARE_TX_H
+#define FONT_GLYPHS_W       FONT_SQUARE_GLYPHS_W
+#define FONT_GLYPHS_H       FONT_SQUARE_GLYPHS_H
+#define S_FONT_TX_DATA      s_font_square_tx_data
+
 #include "res_font_square_sdf_1024.h"
 #define FONT_SDF_TX_W       FONT_SQUARE_SDF_TX_W
 #define FONT_SDF_TX_H       FONT_SQUARE_SDF_TX_H
@@ -28,7 +25,16 @@
 #define FONT_SDF_GLYPHS_H   FONT_SQUARE_SDF_GLYPHS_H
 #define FONT_SDF_SPREAD     FONT_SQUARE_SDF_SPREAD
 #define S_FONT_SDF_TX_DATA  s_font_square_sdf_tx_data
-#else
+
+#else // Roboto Monospace font
+
+#include "res_font_roboto_1024.h"
+#define FONT_TX_W           FONT_ROBOTO_TX_W
+#define FONT_TX_H           FONT_ROBOTO_TX_H
+#define FONT_GLYPHS_W       FONT_ROBOTO_GLYPHS_W
+#define FONT_GLYPHS_H       FONT_ROBOTO_GLYPHS_H
+#define S_FONT_TX_DATA      s_font_roboto_tx_data
+
 #include "res_font_roboto_sdf_1024.h"
 #define FONT_SDF_TX_W       FONT_ROBOTO_SDF_TX_W
 #define FONT_SDF_TX_H       FONT_ROBOTO_SDF_TX_H
@@ -36,7 +42,9 @@
 #define FONT_SDF_GLYPHS_H   FONT_ROBOTO_SDF_GLYPHS_H
 #define FONT_SDF_SPREAD     FONT_ROBOTO_SDF_SPREAD
 #define S_FONT_SDF_TX_DATA  s_font_roboto_sdf_tx_data
+
 #endif
+
 
 static_assert(FONT_GLYPHS_W == FONT_SDF_GLYPHS_W);
 static_assert(FONT_GLYPHS_H == FONT_SDF_GLYPHS_H);
@@ -216,7 +224,7 @@ void start(void) {
   glGenTextures(1, &font_tx);
   glBindTexture(GL_TEXTURE_2D, font_tx);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, FONT_TX_W, FONT_TX_H, 0, GL_RED,
-      GL_UNSIGNED_BYTE, s_font_tx_data);
+      GL_UNSIGNED_BYTE, S_FONT_TX_DATA);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
