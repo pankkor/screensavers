@@ -239,7 +239,7 @@ void start(void) {
   struct window w;
 
   event_loop_init(&loop);
-  window_init(&w, 0 /* vsync */, 0 /*is_full_screen*/);
+  window_init(&w, /*vsync=*/0, /*high_dpi*/1, /*is_full_screen=*/0);
 
   const GLubyte* version_cstr = glGetString(GL_VERSION);
   print_cstr(STDOUT, "OpenGL version: \n");

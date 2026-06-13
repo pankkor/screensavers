@@ -61,7 +61,7 @@ f32 BG_COLOR[4] = {0.2f, 0.2f, 0.2f, 1.0f};
 // GLSL
 // --------------------------------------
 static const char * const s_text_vert_src  = GLSL_V410 "                     \r\
-uniform vec2 u_resolution;                                                   \r\
+uniform vec2 u_resolution_pt;                                                \r\
 uniform vec4 u_rect;                                                         \r\
 uniform ivec2 u_buf_size; /* pow of 2 */                                     \r\
 uniform ivec2 u_buf_window;                                                  \r\
@@ -72,7 +72,7 @@ out vec2 f_win_pos;                                                          \r\
 void main(void) {                                                            \r\
   vec2 v = vec2(gl_VertexID & 1, (gl_VertexID >> 1) & 1);                    \r\
   vec2 uv = vec2(v.x, 1.0 - v.y);                                            \r\
-  vec2 vert = (u_rect.xy + v * u_rect.zw) / u_resolution; /* in [0, 1] */    \r\
+  vec2 vert = (u_rect.xy + v * u_rect.zw) / u_resolution_pt; /* in [0, 1] */ \r\
   vec2 ndc = 2.0 * vert - 1.0; /* in [-1, 1] */                              \r\
                                                                              \r\
   f_win_pos = uv * u_buf_window + u_offset;                                  \r\
@@ -185,7 +185,7 @@ void start(void) {
   struct window w;
 
   event_loop_init(&loop);
-  window_init(&w, 0 /* vsync */, 0 /*is_full_screen*/);
+  window_init(&w, /*vsync=*/0, /*high_dpi*/1, /*is_full_screen=*/0);
 
   GLint max_array_texture_layers;
   glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &max_array_texture_layers);
@@ -253,7 +253,7 @@ void start(void) {
   glBindTexture(GL_TEXTURE_BUFFER, tbo);
   glTexBuffer(GL_TEXTURE_BUFFER, GL_R8UI, text_bo);
 
-  f32 rect[4] = {0, 0, w.view_size_px[0], w.view_size_px[1]};
+  f32 rect[4] = {0, 0, w.rect[2], w.rect[3]}; // in points
 
   glUniform1i(glGetUniformLocation(text_prog, "font_tx"), 0);
   glUniform1i(glGetUniformLocation(text_prog, "sdf_tx"), 1);
@@ -262,7 +262,7 @@ void start(void) {
   glUniform2i(glGetUniformLocation(text_prog, "u_buf_size"), BUF_W, BUF_H);
   glUniform2i(glGetUniformLocation(text_prog, "u_glyphs_count"), FONT_GLYPHS_W,
       FONT_GLYPHS_H);
-  glUniform2f(glGetUniformLocation(text_prog, "u_resolution"), rect[2], rect[3]);
+  glUniform2f(glGetUniformLocation(text_prog, "u_resolution_pt"), rect[2], rect[3]);
   glUniform1i(glGetUniformLocation(text_prog, "u_sdf_spread"), FONT_SDF_SPREAD);
 
   // Logic

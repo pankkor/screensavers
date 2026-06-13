@@ -1530,12 +1530,13 @@ struct window {
   CGSConnectionID   cid;
   CGWindowID        wid;
   CGLContextObj     glctx;
-  u32               rect_pts[4];      // x, y, w, h (in points)
-  u32               view_size_px[2];  // w, h       (in pixels)
+  u32               rect[4];          // window rect  x, y, w, h (in points)
+  u32               view_size_px[2];  // backing view w, h       (in pixels)
 };
 
 // Init transparent window and OpenGL context
-static void window_init(struct window *w, b32 is_vsync, b32 is_full_screen) {
+static void window_init(struct window *w, b32 is_vsync, b32 shall_high_dpi,
+    b32 is_full_screen) {
   CGDirectDisplayID did;
   CGWindowID        wid;
   CGSConnectionID   cid;
@@ -1655,7 +1656,9 @@ static void window_init(struct window *w, b32 is_vsync, b32 is_full_screen) {
   GLint surface_opacity = 0;
   CGLSetParameter(glctx, kCGLCPSurfaceOpacity, &surface_opacity);
 
-  GLint view_size_px[2] = { dmode_px[0], dmode_px[1] };
+  GLint view_size_px[2];
+  view_size_px[0] = shall_high_dpi ? dmode_px[0] : dmode_pts[0];
+  view_size_px[1] = shall_high_dpi ? dmode_px[1] : dmode_pts[1];
   cgl_err = CGLSetParameter(glctx, kCGLCPSurfaceBackingSize, view_size_px);
   EXPECT(!cgl_err, "CGLSetParameter(kCGLCPSurfaceBackingSize) failed\n");
 
@@ -1692,7 +1695,7 @@ static void window_init(struct window *w, b32 is_vsync, b32 is_full_screen) {
     .cid          = cid,
     .wid          = wid,
     .glctx        = glctx,
-    .rect_pts     = {
+    .rect         = {
       win_rect.origin.x,
       win_rect.origin.y,
       win_rect.size.width,
@@ -2141,7 +2144,7 @@ void timelines_gpu_init(struct timelines_gpu *tgs) {
   tgs->loc_offset          = glGetUniformLocation(tgs->prog, "u_offset");
   tgs->loc_izoom           = glGetUniformLocation(tgs->prog, "u_izoom");
   tgs->loc_scroll          = glGetUniformLocation(tgs->prog, "u_scroll");
-  tgs->loc_points_count    = glGetUniformLocation( tgs->prog, "u_points_count");
+  tgs->loc_points_count    = glGetUniformLocation(tgs->prog, "u_points_count");
   tgs->loc_resolution      = glGetUniformLocation(
       tgs->prog, "u_resolution");
   tgs->loc_timelines_count = glGetUniformLocation(
